@@ -74,6 +74,12 @@ jobs:
               continue
             fi
 
+            # シンボリックリンクがあると、tools/ の外のファイル(ランナー上の任意のファイル)を公開しうる
+            if [ -n "$(find "$dir" -type l -print -quit)" ]; then
+              echo "tools/$slug にシンボリックリンクがある" >&2
+              exit 1
+            fi
+
             config="$RUNNER_TEMP/wrangler-$slug.jsonc"
             cat > "$config" <<JSON
           {

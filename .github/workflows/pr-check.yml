@@ -2,7 +2,7 @@ name: pr-check
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
@@ -10,10 +10,10 @@ permissions:
 jobs:
   scope:
     runs-on: ubuntu-latest
-    # 本人が infra/ や docs/ を変える PR だけ飛ばす。ラベルだけでは誰でも付けられる前提で、作者の一致も条件にする
-    if: >-
-      !(github.event.pull_request.user.login == 'nakake'
-      && contains(github.event.pull_request.labels.*.name, 'infra'))
+    # routine は claude/ ブランチにしか push できないので、AI の PR はここで必ず検査される。
+    # 作者やラベルでは判定しない: routine の GitHub 操作は本人の資格情報に差し替えて送られるため、
+    # AI の PR も作者が本人になりうる
+    if: startsWith(github.event.pull_request.head.ref, 'claude/')
     steps:
       - uses: actions/checkout@v4
         with:

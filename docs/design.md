@@ -53,7 +53,7 @@ trend-factory/            (GitHub 公開。routine に紐付け)
 └── .github/
     ├── CODEOWNERS
     └── workflows/
-        ├── pr-check.yml  secret なし・読み取り権限。差分が tools/<slug>/ の外に出ていたら落とす。静的ファイル以外(package.json、wrangler 設定、*.ts 等)があれば落とす
+        ├── pr-check.yml  claude/ ブランチの PR で動く。secret なし・読み取り権限。差分が tools/<slug>/ の外に出ていたら落とす。静的ファイル以外(package.json、wrangler 設定、*.ts 等)があれば落とす
         └── deploy-tool.yml  main への push で、変わった tools/<slug>/ を本番へ。環境 production(main 限定)の secret を使う
 ```
 
