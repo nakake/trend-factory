@@ -1,1 +1,6 @@
-段 2 で作る(D1 スキーマ、core、console)。
+# infra
+
+- `core/`: トレンド収集 Cron と AI 用 API(`agent.nakake.com`)。手順は `core/README.md`
+- `console/`: 段 3 で作る
+
+`pnpm -C infra install` のあと `pnpm -C infra test` / `pnpm -C infra typecheck`。D1 のスキーマの正本は `core/migrations/`。
