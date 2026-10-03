@@ -1,0 +1,29 @@
+name: pr-check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  scope:
+    runs-on: ubuntu-latest
+    # 本人が infra/ や docs/ を変える PR だけ飛ばす。ラベルだけでは誰でも付けられる前提で、作者の一致も条件にする
+    if: >-
+      !(github.event.pull_request.user.login == 'nakake'
+      && contains(github.event.pull_request.labels.*.name, 'infra'))
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check PR scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # 検査スクリプトは base 側のものを使う。PR が自分の検査を書き換えて通るのを防ぐ
+        run: |
+          git show "$BASE_SHA:.github/scripts/check-pr-scope.sh" > "$RUNNER_TEMP/check-pr-scope.sh"
+          git diff --name-only --no-renames "$BASE_SHA...$HEAD_SHA" | bash "$RUNNER_TEMP/check-pr-scope.sh"

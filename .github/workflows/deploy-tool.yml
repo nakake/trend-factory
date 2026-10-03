@@ -1,0 +1,89 @@
+name: deploy-tool
+
+on:
+  push:
+    branches: [main]
+    paths: ['tools/**']
+  workflow_dispatch:
+    inputs:
+      slug:
+        description: 'tools/<slug> のスラッグ'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-tool
+  cancel-in-progress: false
+
+env:
+  WRANGLER_VERSION: 4.147.0
+  # wrangler の設定を生成するときの固定値。挙動が日付で変わるのを避けるため更新は手動
+  COMPATIBILITY_DATE: '2026-10-01'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Deploy changed tools
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          TOOL_DOMAIN: ${{ vars.TOOL_DOMAIN }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_SLUG: ${{ inputs.slug }}
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+        # 入力・差分由来の値は env 経由で渡し、スクリプトに直接展開しない(コマンド注入の防止)
+        run: |
+          set -euo pipefail
+          slug_re='^[a-z0-9][a-z0-9-]{1,40}$'
+          domain_re='^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$'
+
+          if ! [[ $TOOL_DOMAIN =~ $domain_re ]]; then
+            echo "TOOL_DOMAIN が不正または未設定" >&2
+            exit 1
+          fi
+
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            slugs=$INPUT_SLUG
+          elif [[ $BEFORE_SHA =~ ^0+$ ]]; then
+            slugs=$(git ls-tree -d --name-only "$AFTER_SHA" tools/ | sed 's#^tools/##')
+          else
+            slugs=$(git diff --name-only --no-renames "$BEFORE_SHA" "$AFTER_SHA" -- tools/ \
+              | awk -F/ 'NF >= 3 {print $2}' | sort -u)
+          fi
+
+          deployed=0
+          for slug in $slugs; do
+            if [ "$slug" = _template ]; then continue; fi
+            if ! [[ $slug =~ $slug_re ]]; then
+              echo "slug が不正: $slug" >&2
+              exit 1
+            fi
+            dir="$GITHUB_WORKSPACE/tools/$slug"
+            if [ ! -d "$dir" ]; then
+              echo "tools/$slug は存在しない(削除されたので対象外)"
+              continue
+            fi
+
+            config="$RUNNER_TEMP/wrangler-$slug.jsonc"
+            cat > "$config" <<JSON
+          {
+            "name": "tool-$slug",
+            "compatibility_date": "$COMPATIBILITY_DATE",
+            "assets": { "directory": "$dir" },
+            "routes": [{ "pattern": "tool-$slug.$TOOL_DOMAIN", "custom_domain": true }]
+          }
+          JSON
+            npx --yes "wrangler@$WRANGLER_VERSION" deploy --config "$config"
+            deployed=$((deployed + 1))
+          done
+          echo "deployed: $deployed"
