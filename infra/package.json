@@ -1,0 +1,10 @@
+{
+  "name": "trend-factory-infra",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.22.0",
+  "scripts": {
+    "test": "pnpm -C core test",
+    "typecheck": "pnpm -C core typecheck"
+  }
+}
