@@ -12,7 +12,7 @@ export default defineConfig(async () => {
           // pool が持つ workerd は本番用 wrangler より古く、wrangler.jsonc の日付(2026-10-01)を起動できない
           compatibilityDate: '2026-08-01',
           // 本物の secret ではなくテスト専用の値
-          bindings: { AGENT_TOKEN: 'test-token', TEST_MIGRATIONS: migrations },
+          bindings: { AGENT_TOKEN: 'test-token', PREVIEW_SUFFIX: 'preview.example.workers.dev', TEST_MIGRATIONS: migrations },
         },
       }),
     ],

@@ -44,7 +44,7 @@ jobs:
         # 入力・差分由来の値は env 経由で渡し、スクリプトに直接展開しない(コマンド注入の防止)
         run: |
           set -euo pipefail
-          slug_re='^[a-z0-9][a-z0-9-]{1,40}$'
+          slug_re='^[a-z][a-z0-9-]{1,38}[a-z0-9]$'
           domain_re='^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$'
 
           if ! [[ $TOOL_DOMAIN =~ $domain_re ]]; then

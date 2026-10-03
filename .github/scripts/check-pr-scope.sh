@@ -3,7 +3,7 @@
 # git diff 側で --no-renames を付けること。リネーム元のパスが落ちると tools/ 外への移動を見逃す。
 set -u
 
-slug_re='^[a-z0-9][a-z0-9-]{1,40}$'
+slug_re='^[a-z][a-z0-9-]{1,38}[a-z0-9]$'
 allowed_ext_re='\.(html|css|js|svg|png|jpg|webp|ico|json|txt|md)$'
 fail=0
 dirs=()

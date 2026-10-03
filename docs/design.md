@@ -43,7 +43,7 @@ Cloudflare は 2026-09-28 に後継の CLI `cf` をオープンベータで出�
 trend-factory/            (GitHub 公開。routine に紐付け)
 ├── docs/                 requirements.md、design.md、operations.md(トークン更新・月次の棚卸し)
 ├── infra/
-│   ├── schema.sql
+│   ├── (D1 のスキーマは core/migrations/0001_init.sql が正本)
 │   ├── core/             agent.nakake.com。毎時 Cron で Google Trends RSS(JP)→ D1、JST 0 時台に 400 日超を削除。/api/agent/* を合言葉で提供
 │   └── console/          console.nakake.com。Access で本人のみ。読み取り専用の一覧
 ├── routines/             ideas.md、build.md(routine は main のものを読む)
@@ -69,17 +69,17 @@ trend-factory/            (GitHub 公開。routine に紐付け)
 
 ### D1(本体アカウント)
 - `trends(term, day_jst, traffic, news_json, first_seen, last_seen)`、`UNIQUE(term, day_jst)`。UPSERT で traffic は大きいほうを残す
-- `ideas(id, slug UNIQUE, title, summary, sources_json, scores_json, total, status, claimed_at, created_at)`。status は 候補 / 実装中 / 実装済み / 見送り
-- `builds(slug, preview_url, pr_url, created_at)`
+- `ideas(id, slug UNIQUE, title, summary, sources_json, scores_json, total, status, attempts, claimed_at, created_at)`。status は candidate / building / built / skipped(表示側で 候補 / 実装中 / 実装済み / 見送り)。slug は `^[a-z][a-z0-9-]{1,38}[a-z0-9]$`(プレビュー別名・ホスト名に使えるよう、先頭は英字、末尾はハイフン不可)。attempts は claim ごとに +1
+- `builds(slug, preview_url, pr_url UNIQUE, created_at)`
 - `runs(id, kind, started_at, finished_at, result, note)`
 - `settings(key, value)`: 保存日数 400、実装する最低点
 
 ### AI 用 API(`core`、`agent.nakake.com`、`Authorization: Bearer <合言葉>`)
 - `GET /api/agent/trends?hours=24`、`GET /api/agent/ideas?days=60`(重複を避ける材料)
-- `POST /api/agent/ideas`: 追加のみ。slug が重複したら 409
-- `POST /api/agent/claim`: 最低点以上で最高点の 候補 を 1 件、`UPDATE ... RETURNING` で 実装中 にして返す。6 時間たっても 実装中 のものは 候補 に戻す。該当なしなら 204 で、routine は何もせず終わる
-- `POST /api/agent/builds`: preview_url と pr_url を正規表現で検証してから保存し、案を 実装済み にする
-- `POST /api/agent/runs`: 開始・終了・失敗の記録
+- `POST /api/agent/ideas`: 追加のみ。1 回 20 件まで、直近 24 時間で 40 件を超えたら 429。一部の slug が重複したら 201 で、重複分を `skipped` に返し他は入れる。全件が重複なら 409。同一リクエスト内で slug が重なったときは最初のものを入れ、後のものを `skipped` にする(`inserted` と両方には出ない)。scores はキー `^[a-z_]{1,30}$` で最大 10 個、sources は https の URL(空白・制御文字なし)。文字列は制御文字を弾く(summary と note は改行だけ可)
+- `POST /api/agent/claim`: 最低点以上で最高点の 候補 を 1 件、`UPDATE ... RETURNING` で 実装中 にして返す。6 時間たっても 実装中 のものは 候補 に戻す。building が 1 件でもあれば(6 時間経過分を戻した後で判定)取らずに 204。戻すとき attempts が 3 以上なら skipped にして居座りを防ぐ。該当なしでも 204 で、routine は何もせず終わる
+- `POST /api/agent/builds`: preview_url と pr_url を正規表現で検証してから保存し、building の案を built にする。直近 24 時間で 5 件を超えたら 429、pr_url が重複したら 409。`PREVIEW_SUFFIX` が未設定なら 503
+- `POST /api/agent/runs`: 開始・終了・失敗の記録。ideas/build の記録は直近 24 時間で 60 件を超えたら 429。同じ kind の started 行は id が分かれば終了にできる。害が小さいので許容
 - 本番・承認に関わる操作は持たない
 
 ### 一覧ページ(`console`)

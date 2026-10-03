@@ -10,5 +10,6 @@ beforeEach(async () => {
     env.DB.prepare('DELETE FROM ideas'),
     env.DB.prepare('DELETE FROM builds'),
     env.DB.prepare('DELETE FROM runs'),
+    env.DB.prepare(`INSERT OR REPLACE INTO settings (key, value) VALUES ('retention_days', '400'), ('min_score', '60')`),
   ]);
 });

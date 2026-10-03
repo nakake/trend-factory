@@ -12,6 +12,9 @@ export interface TrendItem {
 }
 
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+// D1 の 1 文の長さ上限(100KB)に json_each の引数が収まるよう、件数と長さを抑える
+const MAX_ITEMS = 100;
+const MAX_NEWS_PER_ITEM = 5;
 
 export function toJstDay(d: Date): string {
   return new Date(d.getTime() + JST_OFFSET_MS).toISOString().slice(0, 10);
@@ -21,11 +24,17 @@ export function jstHour(d: Date): number {
   return new Date(d.getTime() + JST_OFFSET_MS).getUTCHours();
 }
 
+// 範囲外・サロゲート・0 の参照は fromCodePoint が例外を投げるか壊れた文字列になるので U+FFFD にする
+function fromRef(n: number): string {
+  if (!Number.isInteger(n) || n <= 0 || n > 0x10ffff || (n >= 0xd800 && n <= 0xdfff)) return '�';
+  return String.fromCodePoint(n);
+}
+
 function decode(s: string): string {
   return s
     .replace(/^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/, '$1')
-    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&#(\d+);/g, (_, n) => fromRef(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => fromRef(parseInt(n, 16)))
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
@@ -50,29 +59,44 @@ export function parseTraffic(raw: string | undefined): number {
   return Math.round(n * (m[2] ? mult[m[2]] : 1));
 }
 
+function parseItem(body: string): TrendItem | null {
+  const term = tag(body, 'title');
+  const pub = tag(body, 'pubDate');
+  if (!term || !pub) return null;
+  const t = Date.parse(pub);
+  if (Number.isNaN(t)) return null;
+  const news: NewsItem[] = [];
+  for (const n of body.matchAll(/<ht:news_item>([\s\S]*?)<\/ht:news_item>/g)) {
+    if (news.length >= MAX_NEWS_PER_ITEM) break;
+    const title = tag(n[1], 'ht:news_item_title');
+    if (!title) continue;
+    const url = tag(n[1], 'ht:news_item_url') ?? '';
+    news.push({
+      title: title.slice(0, 200),
+      // 一覧ページがリンクにするので、javascript: などを保存しない
+      url: /^https:\/\/\S+$/.test(url) && url.length <= 1000 ? url : '',
+      source: (tag(n[1], 'ht:news_item_source') ?? '').slice(0, 100),
+    });
+  }
+  return {
+    term: term.slice(0, 200),
+    traffic: parseTraffic(tag(body, 'ht:approx_traffic')),
+    dayJst: toJstDay(new Date(t)),
+    news,
+  };
+}
+
 // ライブラリを入れず必要な要素だけ正規表現で抜くのは、Workers Free の CPU 10ms 制限のため
 export function parseTrendsRss(xml: string): TrendItem[] {
   const items: TrendItem[] = [];
   for (const m of xml.matchAll(/<item>([\s\S]*?)<\/item>/g)) {
-    const body = m[1];
-    const term = tag(body, 'title');
-    const pub = tag(body, 'pubDate');
-    if (!term || !pub) continue;
-    const t = Date.parse(pub);
-    if (Number.isNaN(t)) continue;
-    const news: NewsItem[] = [];
-    for (const n of body.matchAll(/<ht:news_item>([\s\S]*?)<\/ht:news_item>/g)) {
-      const title = tag(n[1], 'ht:news_item_title');
-      const url = tag(n[1], 'ht:news_item_url');
-      if (!title || !url) continue;
-      news.push({ title, url, source: tag(n[1], 'ht:news_item_source') ?? '' });
+    if (items.length >= MAX_ITEMS) break;
+    try {
+      const it = parseItem(m[1]);
+      if (it) items.push(it);
+    } catch (e) {
+      console.error('skip broken RSS item', e);
     }
-    items.push({
-      term,
-      traffic: parseTraffic(tag(body, 'ht:approx_traffic')),
-      dayJst: toJstDay(new Date(t)),
-      news,
-    });
   }
   return items;
 }
