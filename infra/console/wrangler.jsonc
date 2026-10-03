@@ -17,10 +17,9 @@
     }
   ],
   "vars": {
-    // いずれも REPLACE-ME のままだと全リクエストが 503 になる(README の手順 3)
-    "ACCESS_TEAM_DOMAIN": "REPLACE-ME.cloudflareaccess.com",
-    "ACCESS_AUD": "REPLACE-ME",
-    "ALLOWED_EMAIL": "REPLACE-ME",
+    // core と同じ値。工房アカウントの workers.dev サブドメイン(例 "xxx.workers.dev")に置き換える
     "PREVIEW_SUFFIX": "REPLACE-ME.workers.dev"
   }
+  // ACCESS_TEAM_DOMAIN / ACCESS_AUD / ALLOWED_EMAIL はここに書かない(公開リポジトリのため)。
+  // `wrangler secret put` で入れる(README の手順 5)。未設定のあいだは全リクエストが 503
 }

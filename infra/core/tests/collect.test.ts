@@ -112,6 +112,32 @@ describe('collect', () => {
     expect(await remaining()).toEqual(['d10', 'd400']);
   });
 
+  it('purges old runs with the same retention in the JST 0 hour, and keeps them otherwise', async () => {
+    const at = (d: number) => new Date(AT_JST_0.getTime() - d * 86400_000 - 1000).toISOString();
+    const seed = () =>
+      env.DB.batch(
+        [399, 401].map((d) =>
+          env.DB.prepare(`INSERT INTO runs (kind, started_at, finished_at, result) VALUES (?, ?, ?, 'ok')`).bind(`old${d}`, at(d), at(d)),
+        ),
+      );
+    const kinds = async () =>
+      (await env.DB.prepare(`SELECT kind FROM runs WHERE kind LIKE 'old%' ORDER BY kind`).all()).results.map((r) => r.kind);
+    await seed();
+    await collect(env, AT_JST_1, fakeFetch(fixture));
+    expect(await kinds()).toEqual(['old399', 'old401']);
+    await collect(env, AT_JST_0, fakeFetch(fixture));
+    expect(await kinds()).toEqual(['old399']);
+    const own = await env.DB.prepare(`SELECT COUNT(*) AS n FROM runs WHERE kind = 'collect'`).first<{ n: number }>();
+    expect(own!.n).toBe(2);
+  });
+
+  it('has the runs indexes', async () => {
+    const r = await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'runs'`).all();
+    const names = r.results.map((x) => x.name);
+    expect(names).toContain('idx_runs_kind_started');
+    expect(names).toContain('idx_runs_result_started');
+  });
+
   it('does not purge outside the JST 0 hour', async () => {
     await seedDays(401, 10);
     await collect(env, AT_JST_1, fakeFetch(fixture));

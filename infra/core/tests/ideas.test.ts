@@ -43,6 +43,12 @@ describe('POST /api/agent/ideas', () => {
     ['control char in title', idea('aa-x', 80, { title: 'a\u0000b' })],
     ['newline in title', idea('aa-x', 80, { title: 'a\nb' })],
     ['DEL in summary', idea('aa-x', 80, { summary: 'a\u007fb' })],
+    ['bidi override in title', idea('aa-x', 80, { title: 'a\u202eb' })],
+    ['zero-width space in title', idea('aa-x', 80, { title: 'a\u200bb' })],
+    ['BOM in summary', idea('aa-x', 80, { summary: 'a\ufeffb' })],
+    ['isolate in summary', idea('aa-x', 80, { summary: 'a\u2066b' })],
+    ['zero-width char in source', idea('aa-x', 80, { sources: ['https://example.com/a\u200bb'] })],
+    ['bidi char in source', idea('aa-x', 80, { sources: ['https://example.com/a\u202eb'] })],
     ['tab in summary', idea('aa-x', 80, { summary: 'a\tb' })],
   ])('rejects %s with 400 and inserts nothing', async (_n, badIdea) => {
     const res = await call('POST', '/api/agent/ideas', [idea('good-one'), badIdea]);

@@ -42,19 +42,29 @@ export interface PageData {
   trends: TrendRow[];
 }
 
+// runs の 3 本は idx_runs_kind_started / idx_runs_result_started が効く形(先頭列の等価条件 + started_at の範囲・順序)にしてある
+export const SQL = {
+  lastCollectOk: `SELECT started_at AS t FROM runs WHERE kind = 'collect' AND result = 'ok' ORDER BY started_at DESC LIMIT 1`,
+  lastRun: 'SELECT * FROM runs WHERE kind = ? ORDER BY started_at DESC, id DESC LIMIT 1',
+  failedRuns: `SELECT * FROM runs WHERE result = 'failed' AND started_at >= ? ORDER BY started_at DESC, id DESC LIMIT 50`,
+  // 同じ語が日をまたいで複数行あるので語で束ね、検索数は最大、ニュースは last_seen が新しい行のものにする
+  trends: `SELECT t.term AS term, MAX(t.traffic) AS traffic,
+    (SELECT t2.news_json FROM trends t2 WHERE t2.term = t.term AND t2.last_seen >= ?1 ORDER BY t2.last_seen DESC LIMIT 1) AS news_json
+    FROM trends t WHERE t.last_seen >= ?1 GROUP BY t.term ORDER BY traffic DESC, t.term LIMIT 30`,
+};
+
 export async function loadPageData(env: Env, now: Date = new Date()): Promise<PageData> {
   const db = env.DB;
   const day = new Date(now.getTime() - 86400_000).toISOString();
   const week = new Date(now.getTime() - 7 * 86400_000).toISOString();
-  const lastRun = (kind: string) =>
-    db.prepare('SELECT * FROM runs WHERE kind = ? ORDER BY started_at DESC, id DESC LIMIT 1').bind(kind);
+  const lastRun = (kind: string) => db.prepare(SQL.lastRun).bind(kind);
 
   // 1 回の batch にまとめるのは、D1 Free の「1 回の実行で 50 クエリ」に収めるのと往復を減らすため
   const r = await db.batch([
-    db.prepare(`SELECT MAX(started_at) AS t FROM runs WHERE kind = 'collect' AND result = 'ok'`),
+    db.prepare(SQL.lastCollectOk),
     lastRun('ideas'),
     lastRun('build'),
-    db.prepare(`SELECT * FROM runs WHERE result = 'failed' AND started_at >= ? ORDER BY started_at DESC, id DESC LIMIT 50`).bind(week),
+    db.prepare(SQL.failedRuns).bind(week),
     db.prepare(
       `SELECT (SELECT COUNT(*) FROM trends) AS trends, (SELECT COUNT(*) FROM ideas) AS ideas,
               (SELECT COUNT(*) FROM builds) AS builds, (SELECT COUNT(*) FROM runs) AS runs`,
@@ -64,7 +74,7 @@ export async function loadPageData(env: Env, now: Date = new Date()): Promise<Pa
       `SELECT slug, title, summary, sources_json, scores_json, total, status, attempts, created_at
        FROM ideas ORDER BY created_at DESC, id DESC LIMIT 100`,
     ),
-    db.prepare('SELECT term, traffic, news_json FROM trends WHERE last_seen >= ? ORDER BY traffic DESC, term LIMIT 30').bind(day),
+    db.prepare(SQL.trends).bind(day),
   ]);
   const rows = <T>(i: number) => r[i].results as T[];
   return {

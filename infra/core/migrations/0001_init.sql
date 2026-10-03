@@ -42,6 +42,8 @@ CREATE TABLE runs (
   result TEXT NOT NULL,
   note TEXT
 );
+CREATE INDEX idx_runs_kind_started ON runs (kind, started_at);
+CREATE INDEX idx_runs_result_started ON runs (result, started_at);
 
 CREATE TABLE settings (
   key TEXT PRIMARY KEY,

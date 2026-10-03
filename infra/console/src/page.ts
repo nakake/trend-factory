@@ -1,5 +1,5 @@
 import type { BuildRow, IdeaRow, PageData, RunRow, TrendRow } from './data';
-import { esc, isPrUrl, isPreviewUrl, isSafeUrl, jst, link } from './html';
+import { esc, externalLink, isPrUrl, isPreviewUrl, jst, link, stripSlash } from './html';
 
 export const COLLECT_STALE_MS = 2 * 3600_000;
 
@@ -11,6 +11,19 @@ const STATUS: Record<string, string> = {
 };
 
 const RESULT: Record<string, string> = { started: '開始のみ(終了の記録なし)', ok: '成功', failed: '失敗', noop: '対象なし' };
+
+// 1 行が壊れていても(想定外の JSON など)ページ全体は出す
+function safeRows<T>(rows: T[], cols: number, render: (r: T) => string): string {
+  return rows
+    .map((r) => {
+      try {
+        return render(r);
+      } catch {
+        return `<tr><td colspan="${cols}" class="muted">表示できない行</td></tr>`;
+      }
+    })
+    .join('');
+}
 
 function parseJson(s: string): unknown {
   try {
@@ -52,16 +65,15 @@ function summary(d: PageData): string {
 
 function builds(rows: BuildRow[], suffix: string): string {
   if (!rows.length) return '<h2>小物</h2><p class="muted">まだありません。</p>';
-  const body = rows
-    .map((b) => {
+  const body = safeRows(rows, 5, (b) => {
+      const pv = stripSlash(b.preview_url);
       const prod = `https://tool-${b.slug}.nakake.com`;
       const prodOk = /^[a-z][a-z0-9-]{1,38}[a-z0-9]$/.test(b.slug);
       return `<tr><td>${esc(b.slug)}</td><td class="nowrap">${esc(jst(b.created_at))}</td>
-<td>${link(b.preview_url, isPreviewUrl(b.preview_url, b.slug, suffix))}</td>
+<td>${link(pv, isPreviewUrl(pv, b.slug, suffix))}</td>
 <td>${link(b.pr_url, isPrUrl(b.pr_url))}</td>
 <td>${prodOk ? link(prod, true) : '-'} <span class="muted">(マージ後に有効)</span></td></tr>`;
-    })
-    .join('');
+  });
   return `<h2>小物</h2><div class="table-wrap"><table><thead><tr><th>slug</th><th>作成(JST)</th><th>プレビュー</th><th>PR</th><th>本番 URL(マージ後に有効)</th></tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
@@ -70,7 +82,7 @@ function ideaRow(i: IdeaRow): string {
   const scores =
     sc && typeof sc === 'object' && !Array.isArray(sc)
       ? Object.entries(sc as Record<string, unknown>)
-          .map(([k, v]) => `${esc(k)} ${esc(v)}`)
+          .map(([k, v]) => `${esc(k)} ${typeof v === 'number' || typeof v === 'string' ? esc(v) : '-'}`)
           .join('<br>')
       : '';
   const src = parseJson(i.sources_json);
@@ -78,7 +90,7 @@ function ideaRow(i: IdeaRow): string {
     ? src.filter((s): s is string => typeof s === 'string').slice(0, 10)
     : [];
   const srcHtml = sources.length
-    ? `<ul>${sources.map((s) => `<li>${link(s, isSafeUrl(s))}</li>`).join('')}</ul>`
+    ? `<ul>${sources.map((s) => `<li>${externalLink(s)}</li>`).join('')}</ul>`
     : '';
   return `<tr><td><strong>${esc(i.title)}</strong><br><span class="muted">${esc(i.slug)}</span><br>${esc(i.summary)}</td>
 <td class="num">${esc(i.total)}</td><td class="scores">${scores}</td>
@@ -88,9 +100,7 @@ function ideaRow(i: IdeaRow): string {
 
 function ideas(rows: IdeaRow[]): string {
   if (!rows.length) return '<h2>案</h2><p class="muted">まだありません。</p>';
-  return `<h2>案(新しい順、最大 100 件)</h2><div class="table-wrap"><table><thead><tr><th>案</th><th>合計</th><th>採点</th><th>状態</th><th>試行</th><th>情報源</th><th>作成(JST)</th></tr></thead><tbody>${rows
-    .map(ideaRow)
-    .join('')}</tbody></table></div>`;
+  return `<h2>案(新しい順、最大 100 件)</h2><div class="table-wrap"><table><thead><tr><th>案</th><th>合計</th><th>採点</th><th>状態</th><th>試行</th><th>情報源</th><th>作成(JST)</th></tr></thead><tbody>${safeRows(rows, 7, ideaRow)}</tbody></table></div>`;
 }
 
 function trendRow(t: TrendRow): string {
@@ -101,7 +111,7 @@ function trendRow(t: TrendRow): string {
       const o = (n && typeof n === 'object' ? n : {}) as Record<string, unknown>;
       const title = typeof o.title === 'string' ? o.title : '';
       const url = typeof o.url === 'string' ? o.url : '';
-      return title ? `<li>${isSafeUrl(url) ? link(url, true, title) : esc(title)}</li>` : '';
+      return title ? `<li>${externalLink(url, title)}</li>` : '';
     })
     .join('');
   return `<tr><td>${esc(t.term)}</td><td class="num">${esc(t.traffic)}</td><td>${items ? `<ul>${items}</ul>` : ''}</td></tr>`;
@@ -109,9 +119,7 @@ function trendRow(t: TrendRow): string {
 
 function trends(rows: TrendRow[]): string {
   if (!rows.length) return '<h2>今日のトレンド</h2><p class="muted">直近 24 時間のデータがありません。</p>';
-  return `<h2>今日のトレンド(直近 24 時間、検索数の多い順に 30 件)</h2><div class="table-wrap"><table><thead><tr><th>語</th><th>検索数</th><th>ニュース</th></tr></thead><tbody>${rows
-    .map(trendRow)
-    .join('')}</tbody></table></div>`;
+  return `<h2>今日のトレンド(直近 24 時間、検索数の多い順に 30 件)</h2><div class="table-wrap"><table><thead><tr><th>語</th><th>検索数</th><th>ニュース</th></tr></thead><tbody>${safeRows(rows, 3, trendRow)}</tbody></table></div>`;
 }
 
 export function renderPage(d: PageData, previewSuffix: string): string {

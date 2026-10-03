@@ -6,6 +6,8 @@ import { CSS } from './style';
 export interface Deps {
   // テストで JWKS の取得を差し替えるため。未指定なら certs エンドポイントを(キャッシュ付きで)読む
   getKeys?: GetKeys;
+  // getKeys を渡さない本番の配線(cachedJwks 経由)をテストするため
+  fetchFn?: typeof fetch;
 }
 
 const SECURITY_HEADERS: Record<string, string> = {
@@ -27,15 +29,20 @@ export async function handle(request: Request, env: Env, deps: Deps = {}): Promi
   const cfg = readAccessConfig(env);
   if (!cfg) return text('console is not configured', 503);
 
-  let ok = false;
+  let reason: string | null;
   try {
-    const getKeys = deps.getKeys ?? cachedJwks(cfg.teamDomain);
-    ok = await verifyAccessJwt(request.headers.get('cf-access-jwt-assertion'), cfg, getKeys);
+    const getKeys = deps.getKeys ?? cachedJwks(cfg.teamDomain, deps.fetchFn);
+    const r = await verifyAccessJwt(request.headers.get('cf-access-jwt-assertion'), cfg, getKeys);
+    reason = r.ok ? null : r.reason;
   } catch (e) {
     // certs に届かないときも通さない
-    console.error('access jwt verification failed', e);
+    reason = 'jwks-unavailable';
+    console.error('jwks error', e instanceof Error ? e.message : 'unknown');
   }
-  if (!ok) return text('forbidden', 403);
+  if (reason) {
+    console.warn(`access denied: ${reason}`);
+    return text('forbidden', 403);
+  }
 
   const path = new URL(request.url).pathname;
   try {

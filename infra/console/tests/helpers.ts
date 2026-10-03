@@ -2,7 +2,7 @@ import { env } from 'cloudflare:workers';
 import { handle } from '../src/index';
 import type { Jwk } from '../src/auth';
 
-const b64url = (b: ArrayBuffer | string) => {
+export const b64url = (b: ArrayBuffer | string) => {
   const bytes = typeof b === 'string' ? new TextEncoder().encode(b) : new Uint8Array(b);
   let s = '';
   for (const x of bytes) s += String.fromCharCode(x);
@@ -37,13 +37,25 @@ export const goodClaims = (over: Record<string, unknown> = {}) => ({
 export async function request(
   method: string,
   path: string,
-  opts: { key: TestKey; jwt?: string | null; claims?: Record<string, unknown>; env?: Partial<Env>; served?: TestKey[] },
+  opts: {
+    key: TestKey;
+    jwt?: string | null;
+    claims?: Record<string, unknown>;
+    env?: Partial<Env>;
+    served?: Jwk[];
+    // refresh=true で呼ばれたときに返す鍵(鍵のローテーション直後を再現する)
+    afterRefresh?: Jwk[];
+    calls?: boolean[];
+  },
 ) {
   const jwt = opts.jwt === undefined ? await sign(opts.key, opts.claims ?? goodClaims()) : opts.jwt;
   const headers: Record<string, string> = {};
   if (jwt !== null) headers['cf-access-jwt-assertion'] = jwt;
-  const served = (opts.served ?? [opts.key]).map((k) => k.jwk);
+  const served = opts.served ?? [opts.key.jwk];
   return handle(new Request(`https://console.example${path}`, { method, headers }), { ...env, ...opts.env } as Env, {
-    getKeys: async () => served,
+    getKeys: async (refresh) => {
+      opts.calls?.push(refresh);
+      return refresh && opts.afterRefresh ? opts.afterRefresh : served;
+    },
   });
 }

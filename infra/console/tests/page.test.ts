@@ -191,3 +191,100 @@ describe('read-only', () => {
     expect((await request('HEAD', '/', { key })).status).toBe(200);
   });
 });
+
+describe('html helpers', () => {
+  it('escapes & < > " and a single quote', async () => {
+    const { esc } = await import('../src/html');
+    expect(esc(`&<>"'`)).toBe('&amp;&lt;&gt;&quot;&#39;');
+    expect(esc(null)).toBe('');
+  });
+  it('jst returns a raw string and leaves escaping to the caller', async () => {
+    const { jst } = await import('../src/html');
+    expect(jst('<b>x')).toBe('<b>x');
+    expect(jst(null)).toBe('-');
+  });
+  it('refuses bidi and zero-width characters in link URLs', async () => {
+    const { isSafeUrl } = await import('../src/html');
+    expect(isSafeUrl('https://example.com/a')).toBe(true);
+    for (const c of ['​', '‏', '‮', '⁦', '⁩', '﻿']) {
+      expect(isSafeUrl(`https://example.com/a${c}b`)).toBe(false);
+    }
+  });
+});
+
+describe('robustness and details', () => {
+  it('shows only non-number/string score values as "-"', async () => {
+    await insertIdea('odd-scores', { scores: '{"a":1,"b":"x","c":{"z":1},"d":null,"e":[1]}' });
+    const { html } = await page();
+    expect(html).toContain('a 1');
+    expect(html).toContain('b x');
+    expect(html).toContain('c -');
+    expect(html).toContain('d -');
+    expect(html).toContain('e -');
+  });
+
+  it('renders a broken row as "表示できない行" and the rest normally', async () => {
+    const { renderPage } = await import('../src/page');
+    const { loadPageData } = await import('../src/data');
+    await insertIdea('fine-idea');
+    await env.DB.prepare('INSERT INTO builds (slug, preview_url, pr_url, created_at) VALUES (?, ?, ?, ?)')
+      .bind('fine-tool', 'x', 'y', iso(1))
+      .run();
+    await env.DB.prepare('INSERT INTO trends (term, day_jst, traffic, news_json, first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind('fine-term', '2026-10-03', 5, '[]', iso(10), iso(10))
+      .run();
+    const d = await loadPageData(env);
+    d.ideas.unshift(null as never);
+    d.builds.unshift(null as never);
+    d.trends.unshift(null as never);
+    const html = renderPage(d, env.PREVIEW_SUFFIX);
+    expect(html.match(/表示できない行/g)).toHaveLength(3);
+    expect(html).toContain('fine-idea');
+    expect(html).toContain('fine-tool');
+    expect(html).toContain('fine-term');
+  });
+
+  it('links a preview URL that has one trailing slash', async () => {
+    const ok = `https://slash-tool-preview.${env.PREVIEW_SUFFIX}`;
+    await env.DB.prepare('INSERT INTO builds (slug, preview_url, pr_url, created_at) VALUES (?, ?, ?, ?)')
+      .bind('slash-tool', `${ok}/`, 'https://github.com/nakake/trend-factory/pull/3', iso(1000))
+      .run();
+    expect((await page()).html).toContain(`href="${ok}"`);
+  });
+
+  it('groups trends by term (max traffic, newest news) across days', async () => {
+    const ins = (term: string, day: string, traffic: number, msAgo: number, news: string) =>
+      env.DB.prepare('INSERT INTO trends (term, day_jst, traffic, news_json, first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?)')
+        .bind(term, day, traffic, news, iso(msAgo), iso(msAgo))
+        .run();
+    await ins('dup-term', '2026-10-02', 900, 5 * 3600_000, '[{"title":"old-news","url":""}]');
+    await ins('dup-term', '2026-10-03', 100, 1000, '[{"title":"new-news","url":""}]');
+    const { html } = await page();
+    expect(html.match(/<tr><td>dup-term<\/td>/g)).toHaveLength(1);
+    expect(html).toContain('<td class="num">900</td>');
+    expect(html).toContain('new-news');
+    expect(html).not.toContain('old-news');
+  });
+
+  it('shows the host next to external links and does not link bidi URLs', async () => {
+    await insertIdea('host-idea', {
+      sources: JSON.stringify(['https://example.com/a', 'https://evil.example/a‮b']),
+    });
+    await env.DB.prepare('INSERT INTO trends (term, day_jst, traffic, news_json, first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind('t', '2026-10-03', 5, JSON.stringify([{ title: 'headline', url: 'https://news.example.org/x' }]), iso(10), iso(10))
+      .run();
+    const { html } = await page();
+    expect(html).toContain('(example.com)');
+    expect(html).toContain('headline</a> <span class="muted">(news.example.org)</span>');
+    expect(html).not.toContain('href="https://evil.example');
+  });
+
+  it('uses the runs indexes for the runs queries', async () => {
+    const { SQL } = await import('../src/data');
+    const plan = async (sql: string, ...b: unknown[]) =>
+      JSON.stringify((await env.DB.prepare(`EXPLAIN QUERY PLAN ${sql}`).bind(...b).all()).results);
+    expect(await plan(SQL.lastCollectOk)).toMatch(/SEARCH runs USING INDEX idx_runs_(kind|result)_started/);
+    expect(await plan(SQL.lastRun, 'ideas')).toContain('idx_runs_kind_started');
+    expect(await plan(SQL.failedRuns, iso(0))).toContain('idx_runs_result_started');
+  });
+});
