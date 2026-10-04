@@ -35,7 +35,8 @@ RULES = [
     ("http-equiv", re.compile(r"http-equiv", I)),
     ("srcdoc", re.compile(r"srcdoc", I)),
     ("javascript:", re.compile(r"javascript:", I)),
-    ("data:", re.compile(r"data:", I)),
+    # href="data:," (空の data URL。favicon の 404 を出さないための定型)だけは中身が無いので数えない
+    ("data:", re.compile(r"data:(?!,[\"'])", I)),
     ("on...= (イベント属性)", re.compile(r"\bon[a-z]+\s*=", I)),
     ("@import", re.compile(r"@import", I)),
     ("url(", re.compile(r"\burl\s*\(", I)),

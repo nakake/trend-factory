@@ -1,8 +1,15 @@
-import { getMinScore } from './settings';
+import { getCandidateTtlDays, getMinScore } from './settings';
 
 const SLUG_RE = /^[a-z][a-z0-9-]{1,38}[a-z0-9]$/;
-const SCORE_KEY_RE = /^[a-z_]{1,30}$/;
 const SOURCE_RE = /^https:\/\/\S+$/;
+// 案出しの情報源のうち、URL を持つのは HN と Product Hunt だけ。それ以外のホストを受け付けると、
+// 一覧ページに任意のリンクを並べる経路になる
+const HN_ITEM_RE = /^https:\/\/news\.ycombinator\.com\/item\?id=\d{1,12}$/;
+const PH_PREFIX = 'https://www.producthunt.com/';
+const MAX_SOURCES = 5;
+// 採点の項目と上限は routines/ideas.md と揃える。自由なキーを許すと、採点欄が任意の文字列を運ぶ経路になる
+const SCORE_MAX: Record<string, number> = { need: 30, demand: 25, fit: 25, novelty: 10, longevity: 10 };
+const SCORE_KEYS = Object.keys(SCORE_MAX);
 // 小物は別リポジトリ(routine に紐付ける唯一のリポジトリ)にある。このリポジトリの PR は AI が作れないので受け付けない
 const PR_URL_RE = /^https:\/\/github\.com\/nakake\/trend-factory-tools\/pull\/[1-9]\d{0,6}$/;
 const MAX_BODY_BYTES = 256 * 1024;
@@ -98,26 +105,30 @@ function validateIdea(v: unknown, i: number): { idea?: IdeaInput; errors: string
   push(strError(v.summary, `${p}.summary`, SUMMARY));
 
   const sources = v.sources ?? [];
-  if (!Array.isArray(sources) || sources.length > 20) {
-    errors.push(`${p}.sources must be an array of up to 20 strings`);
+  if (!Array.isArray(sources) || sources.length > MAX_SOURCES) {
+    errors.push(`${p}.sources must be an array of up to ${MAX_SOURCES} strings`);
   } else {
     sources.forEach((s, j) => {
       push(strError(s, `${p}.sources[${j}]`, SOURCE));
-      if (typeof s === 'string' && !SOURCE_RE.test(s)) errors.push(`${p}.sources[${j}] must be an https URL without whitespace`);
+      if (typeof s === 'string' && !(SOURCE_RE.test(s) && (HN_ITEM_RE.test(s) || s.startsWith(PH_PREFIX))))
+        errors.push(`${p}.sources[${j}] must be https://news.ycombinator.com/item?id=<digits> or start with ${PH_PREFIX}`);
     });
   }
 
-  const scores = v.scores ?? {};
-  if (!isObj(scores) || Object.keys(scores).length > 10) {
-    errors.push(`${p}.scores must be an object with up to 10 keys`);
+  const scores = v.scores;
+  let sum = 0;
+  if (!isObj(scores) || Object.keys(scores).length !== SCORE_KEYS.length || !SCORE_KEYS.every((k) => k in scores)) {
+    errors.push(`${p}.scores must have exactly these keys: ${SCORE_KEYS.join(', ')}`);
   } else {
-    for (const [k, n] of Object.entries(scores)) {
-      if (!SCORE_KEY_RE.test(k)) errors.push(`${p}.scores key invalid: ${k.slice(0, 40)}`);
-      if (typeof n !== 'number' || !Number.isFinite(n)) errors.push(`${p}.scores.${k.slice(0, 40)} must be a finite number`);
+    for (const k of SCORE_KEYS) {
+      const n = scores[k];
+      if (typeof n !== 'number' || !Number.isInteger(n) || n < 0 || n > SCORE_MAX[k])
+        errors.push(`${p}.scores.${k} must be an integer 0-${SCORE_MAX[k]}`);
+      else sum += n;
     }
+    // 合計を別に送らせるのは、採点の内訳と食い違う total で claim の順位を動かせないようにするため
+    if (v.total !== sum) errors.push(`${p}.total must equal the sum of scores`);
   }
-  if (typeof v.total !== 'number' || !Number.isFinite(v.total) || v.total < 0 || v.total > 100)
-    errors.push(`${p}.total must be a number 0-100`);
   if (errors.length) return { errors };
   return {
     errors,
@@ -140,9 +151,10 @@ function safeParse(s: unknown, fallback: unknown): unknown {
   }
 }
 
-function parseIdeaRow(r: Record<string, unknown>) {
-  const { sources_json, scores_json, ...rest } = r;
-  return { ...rest, sources: safeParse(sources_json, []), scores: safeParse(scores_json, {}) };
+// sources は返さない。実装側は使わず、外部由来の URL 文字列を実装 routine の文脈へ運ぶ経路になる
+function claimedIdea(r: Record<string, unknown>) {
+  const { sources_json: _sources, scores_json, ...rest } = r;
+  return { ...rest, scores: safeParse(scores_json, {}) };
 }
 
 async function countSince(env: Env, table: 'ideas' | 'builds' | 'runs', col: string, since: string, where = '1'): Promise<number> {
@@ -220,10 +232,11 @@ async function postClaim(env: Env) {
   const nowMs = Date.now();
   const cutoff = new Date(nowMs - BUILDING_TIMEOUT_MS).toISOString();
   const now = new Date(nowMs).toISOString();
-  const minScore = await getMinScore(env);
+  const [minScore, ttlDays] = [await getMinScore(env), await getCandidateTtlDays(env)];
+  const stale = new Date(nowMs - ttlDays * DAY_MS).toISOString();
   // 戻しと取得を 1 batch にして、間に別のリクエストが割り込まないようにする。
   // building が 1 件でもあれば取らない(同時に走る実装を 1 本に絞る)
-  const [, , claimed] = await env.DB.batch([
+  const [, , , claimed] = await env.DB.batch([
     env.DB.prepare(
       `UPDATE ideas SET status = 'skipped', claimed_at = NULL
        WHERE status = 'building' AND claimed_at < ?1 AND attempts >= ?2`,
@@ -231,11 +244,14 @@ async function postClaim(env: Env) {
     env.DB.prepare(
       `UPDATE ideas SET status = 'candidate', claimed_at = NULL WHERE status = 'building' AND claimed_at < ?`,
     ).bind(cutoff),
+    // トレンド由来の案は時間がたつと意味が薄れる。古い高得点の案が新しい案より先に取られ続けないよう見送る。
+    // 上の戻しの後に置き、戻ってきた古い案にも効かせる
+    env.DB.prepare(`UPDATE ideas SET status = 'skipped' WHERE status = 'candidate' AND created_at < ?`).bind(stale),
     env.DB.prepare(
       `UPDATE ideas SET status = 'building', claimed_at = ?1, attempts = attempts + 1
        WHERE id = (
          SELECT id FROM ideas WHERE status = 'candidate' AND total >= ?2
-         ORDER BY total DESC, created_at ASC, id ASC LIMIT 1
+         ORDER BY total DESC, created_at DESC, id DESC LIMIT 1
        ) AND status = 'candidate'
          AND NOT EXISTS (SELECT 1 FROM ideas WHERE status = 'building')
        RETURNING *`,
@@ -243,7 +259,28 @@ async function postClaim(env: Env) {
   ]);
   const row = claimed.results[0] as Record<string, unknown> | undefined;
   if (!row) return new Response(null, { status: 204 });
-  return json({ idea: parseIdeaRow(row) });
+  return json({ idea: claimedIdea(row) });
+}
+
+// 実装 routine が、取った案を自分から手放す。作れない案や指示が紛れた案が、
+// 6 時間の期限切れを 3 回待つあいだパイプラインを塞がないようにする
+async function postRelease(request: Request, env: Env) {
+  const body = await readJson(request);
+  if (!body.ok) return body.res;
+  const v = body.value;
+  if (!isObj(v)) return bad('body must be an object');
+  const { slug, outcome } = v;
+  if (typeof slug !== 'string' || !SLUG_RE.test(slug)) return bad('slug invalid');
+  if (outcome !== 'retry' && outcome !== 'skip') return bad('outcome must be retry or skip');
+  // attempts は claim のときに数え済み。retry でも上限に達していれば見送る
+  const row = await env.DB.prepare(
+    `UPDATE ideas SET status = CASE WHEN ?2 = 'skip' OR attempts >= ?3 THEN 'skipped' ELSE 'candidate' END, claimed_at = NULL
+     WHERE slug = ?1 AND status = 'building' RETURNING status`,
+  )
+    .bind(slug, outcome, MAX_ATTEMPTS)
+    .first<{ status: string }>();
+  if (!row) return bad('idea is not in building state', 409);
+  return json({ slug, status: row.status });
 }
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -345,6 +382,8 @@ export async function handleAgent(request: Request, env: Env): Promise<Response>
         return await postIdeas(request, env);
       case 'POST /api/agent/claim':
         return await postClaim(env);
+      case 'POST /api/agent/release':
+        return await postRelease(request, env);
       case 'POST /api/agent/builds':
         return await postBuilds(request, env);
       case 'POST /api/agent/runs':

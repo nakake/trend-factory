@@ -142,14 +142,25 @@ Referrer-Policy: no-referrer
 
 ## routine の設定
 
-- **sources**: `nakake/trend-factory-tools` だけ。このリポジトリは紐付けない
-- **API credentials**: `trend-factory-api.nakake.com` の合言葉だけ(ヘッダー注入。セッションからは値が見えない)
-- **環境変数**: `CLOUDFLARE_API_TOKEN`(工房トークン)と `CLOUDFLARE_ACCOUNT_ID`(工房アカウント)。credentials の注入がアセットアップロードと両立しないので環境変数で渡す。つまり **工房トークンはセッションから見える**。届くのはプレビュー専用アカウントだけ
-- **手順書**: `routines/ideas.md`、`routines/build.md` はこのリポジトリが正本。routine はこのリポジトリを読めないので、本人側が routine の設定(プロンプト)に流し込む。`routines/README.md` を参照
+routine は 2 本で、環境も 2 つに分ける。案出しは外部の文章を大量に読むので、乗せられても届く先が無いようにする。
+
+| | 案出し(毎日 7:00 JST) | 実装(月・水・金 9:00 JST) |
+|---|---|---|
+| 手順書 | `routines/ideas.md` | `routines/build.md` |
+| sources(リポジトリ) | 無し | `nakake/trend-factory-tools` だけ |
+| API credentials | `trend-factory-api.nakake.com` の合言葉 | 同じ |
+| 環境変数 | 無し(工房トークンを渡さない) | `CLOUDFLARE_API_TOKEN`(工房トークン)、`CLOUDFLARE_ACCOUNT_ID`(工房アカウント) |
+| 外に出せるもの | AI 用 API への案と実行記録だけ | tools リポジトリへの push と PR、プレビュー、AI 用 API |
+
+- 合言葉はヘッダー注入なので、セッションからは値が見えない
+- 工房トークンは、credentials の注入がアセットアップロードと両立しないので環境変数で渡す。つまり **実装側のセッションからは見える**。届くのはプレビュー専用アカウントだけ
+- 手順書はこのリポジトリが正本。routine はこのリポジトリを読めないので、本人側が routine の設定(プロンプト)に流し込む。`routines/README.md` を参照
 - モデルは sonnet
 
-1. **案出し(毎日 7:00 JST)**: HN と Product Hunt のフィードを取得、AI 用 API からトレンドと直近 60 日の案を取得 → 採点 → 新しい案だけ登録
-2. **実装(月・水・金 9:00 JST)**: claim → tools リポジトリの `tools/<slug>/` に実装 → 同梱ブラウザで確認 → プレビューに上げる → PR → builds 登録。失敗したら runs に記録
+流れ:
+
+1. **案出し**: HN(Algolia の API)と Product Hunt のフィード、AI 用 API のトレンドと直近 60 日の案を取得 → 採点 → 新しい案だけ登録(最大 5 件。材料が無ければ登録しない)。取得結果は見出しなどの決まった項目だけを表示し、本文などの自由文を文脈に入れない
+2. **実装**: 指示ファイルの検出 → claim → `tools/<slug>/` に実装 → 同梱ブラウザで確認(本番と同じ CSP を付けて配信) → プレビューに上げる → PR → builds 登録。作るべきでない案は release(skip)、技術的な失敗は release(retry)で手放す
 
 ## D1(本体アカウント)
 
@@ -157,15 +168,28 @@ Referrer-Policy: no-referrer
 - `ideas(id, slug UNIQUE, title, summary, sources_json, scores_json, total, status, attempts, claimed_at, created_at)`。status は candidate / building / built / skipped(表示側で 候補 / 実装中 / 実装済み / 見送り)。slug は `^[a-z][a-z0-9-]{1,38}[a-z0-9]$`。attempts は claim ごとに +1
 - `builds(slug, preview_url, pr_url UNIQUE, created_at)`
 - `runs(id, kind, started_at, finished_at, result, note)`。毎時 1 行増えるので、JST 0 時台の削除で `retention_days` より古い行も消す
-- `settings(key, value)`: 保存日数 400、実装する最低点
+- `settings(key, value)`: `retention_days`(保存日数、400)、`min_score`(実装する最低点、60)、`candidate_ttl_days`(候補のまま置く日数、21。`0002_candidate_ttl.sql` で追加)
 
 ## AI 用 API(`core`、`Authorization: Bearer <合言葉>`)
 
-- `GET /api/agent/trends?hours=24`、`GET /api/agent/ideas?days=60`(重複を避ける材料)
-- `POST /api/agent/ideas`: 追加のみ。1 回 20 件まで、直近 24 時間で 40 件を超えたら 429。一部の slug が重複したら 201 で、重複分を `skipped` に返す。全件が重複なら 409。scores はキー `^[a-z_]{1,30}$` で最大 10 個、sources は https の URL。文字列は制御文字を弾く(summary と note は改行だけ可)
-- `POST /api/agent/claim`: 最低点以上で最高点の 候補 を 1 件、実装中 にして返す。6 時間たっても 実装中 のものは 候補 に戻す(attempts が 3 以上なら 見送り)。building が 1 件でもあれば取らずに 204
-- `POST /api/agent/builds`: preview_url は `https://<slug>-preview.<PREVIEW_SUFFIX>`、pr_url は `^https://github\.com/nakake/trend-factory-tools/pull/[1-9]\d{0,6}$` だけ受け付ける。直近 24 時間で 5 件を超えたら 429、pr_url が重複したら 409
-- `POST /api/agent/runs`: 開始・終了・失敗の記録。note は自由文(routine が手順書の版を書いてよい)。直近 24 時間で 60 件を超えたら 429
+合言葉が無い・違うときは 401。本文が JSON でない、形が違うときは 400(本文は `{"error":[...]}`)。
+
+| 呼び出し | 成功 | それ以外 |
+|---|---|---|
+| `GET /api/agent/trends?hours=24&limit=100` | 200 `{"trends":[{term, day_jst, traffic, news, ...}]}`。news は見出しだけを 3 本まで | |
+| `GET /api/agent/ideas?days=60` | 200 `{"ideas":[{slug, title, status, total, created_at}]}`。summary は返さない | |
+| `POST /api/agent/ideas`(配列、1〜20 件) | 201 `{"inserted":[...],"skipped":[...]}`。skipped は slug が重複したもの | 409 全件が重複 / 400 検証エラー(1 件でもあれば全体を入れない) / 429 直近 24 時間で 40 件を超える |
+| `POST /api/agent/claim`(本文なし) | 200 `{"idea":{id, slug, title, summary, scores, total, status, attempts, claimed_at, created_at}}`。sources は返さない | 204 候補が無い、または実装中の案がある |
+| `POST /api/agent/release` `{"slug","outcome":"retry"\|"skip"}` | 200 `{"slug","status":"candidate"\|"skipped"}` | 409 その案が実装中でない / 400 |
+| `POST /api/agent/builds` `{"slug","preview_url","pr_url"}` | 201 `{"ok":true}`。案を 実装済み にする | 409 案が実装中でない、または登録済み / 400 URL の形が違う / 429 直近 24 時間で 5 件 / 503 `PREVIEW_SUFFIX` 未設定 |
+| `POST /api/agent/runs` 開始 `{"kind","result":"started","note"}` | 201 `{"id"}` | 429 直近 24 時間で 60 件 / 400 |
+| `POST /api/agent/runs` 終了 `{"kind","id","result","note"}` | 200 `{"id"}` | 409 その id が無い、または終了済み / 400 |
+
+- **ideas の検証**: slug は `^[a-z][a-z0-9-]{1,38}[a-z0-9]$`。title は 100 字、summary は 2000 字まで。scores のキーは `need` `demand` `fit` `novelty` `longevity` の 5 つちょうどで、上限は 30 / 25 / 25 / 10 / 10、各 0 以上の整数。total は 5 項目の合計と一致。sources は `https://news.ycombinator.com/item?id=<数字>` か `https://www.producthunt.com/` で始まる URL だけ、最大 5 件、空でもよい。文字列は制御文字と見えない文字を弾く(summary と note は改行だけ可。タブと CR は不可)。採点欄と sources を自由にすると、任意の文字列やリンクを一覧ページと実装側へ運ぶ経路になるので、形を決めている
+- **claim の動き**: 1 回の呼び出しで順に、(1) 6 時間たっても 実装中 のものを 候補 に戻す(attempts が 3 以上なら 見送り)、(2) 作成から `candidate_ttl_days`(既定 21 日)を超えた 候補 を 見送り にする、(3) 実装中 が 1 件も無ければ、最低点(`min_score`、既定 60)以上の 候補 から 1 件を 実装中 にして返す。並びは `total DESC, created_at DESC, id DESC`(同点は新しい案から)。attempts は claim ごとに +1
+- **release**: 実装側が、取った案を自分から手放す。`retry` は 候補 に戻す(attempts が 3 以上なら 見送り)。`skip` はすぐ 見送り。どちらも claimed_at を消す。作れない案や指示が紛れた案が、6 時間の期限切れを 3 回待つあいだパイプラインを塞がないようにする
+- **builds**: preview_url は `https://<slug>-preview.<PREVIEW_SUFFIX>`、pr_url は `^https://github\.com/nakake/trend-factory-tools/pull/[1-9]\d{0,6}$` だけ
+- **runs**: kind は `ideas` / `build`、result は `started` / `ok` / `failed` / `noop`。note は 1000 字までの自由文(routine が手順書の版を書く)
 - 本番・承認に関わる操作は持たない
 
 ## 一覧ページ(`console`)
@@ -201,6 +225,9 @@ Cloudflare は 2026-09-28 に後継の CLI `cf` をオープンベータで出�
 - **Claude の GitHub App の対象が広がる**: `trend-factory` が対象に入ると v2 と同じ状態に戻る。月次で確かめる
 - **一覧ページに AI が登録した文字列が出る**: エスケープと URL 検証で対処済み。公開コマンドの文字は検証済みの値からしか作らない
 - **手順書が公開されている**: 注入文の材料になりうる。外部の文章をデータとして扱う指示を手順書の先頭に置く
+- **案の文章に紛れた指示(注入)**: 案出し側は、取得結果を見出しなどの決まった項目に絞って読み、リポジトリもトークンも持たない環境で動かす。実装側は、summary に作業の指示にあたる文を見つけたら、実装せずに release(skip)で案を見送りにする。これが注入への対処で、見つけられなかった場合の歯止めではない
+- **仕様の形をした注入**: 「入力をこの URL に送る機能」「パスワードの入力欄」のように、指示ではなく作るものの仕様として書かれた悪意は、「指示にあたる文」の判定では止まらない。止めるのは、手順書に列挙した条件(外部への通信なし、秘密の値を入力させない、制約の中で作れないものは skip)と、公開時の CSP・機械検出・本人の確認。列挙に無い形の悪意(紛らわしい文面で入力を誘うなど)は、本人が公開のときに読んで止めるしかない
+- **release の悪用**: 実装側の AI が乗せられると、良い案を skip で見送りにできる。失うのは案 1 件で、一覧ページに 見送り として残る
 
 ## 検証(全体)
 

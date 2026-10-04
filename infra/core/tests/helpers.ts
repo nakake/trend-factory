@@ -27,12 +27,27 @@ export const call = (method: string, path: string, body?: unknown, token: string
 // env を直接書き換えず、一部の値だけ差し替えた env を作る
 export const envWith = (over: Partial<Env>): Env => ({ ...env, ...over }) as Env;
 
+const SCORE_MAX = { need: 30, demand: 25, fit: 25, novelty: 10, longevity: 10 };
+
+// 合計が total になる内訳を、上限の範囲で前から詰めて作る
+export function scoresFor(total: number): Record<string, number> {
+  let rest = total;
+  const out: Record<string, number> = {};
+  for (const [k, max] of Object.entries(SCORE_MAX)) {
+    out[k] = Math.max(0, Math.min(max, rest));
+    rest -= out[k];
+  }
+  return out;
+}
+
+export const HN = 'https://news.ycombinator.com/item?id=1';
+
 export const idea = (slug: string, total = 80, extra: Record<string, unknown> = {}) => ({
   slug,
   title: `title ${slug}`,
   summary: 'summary',
-  sources: ['https://example.com'],
-  scores: { need: 20, effort: 20 },
+  sources: [HN],
+  scores: scoresFor(total),
   total,
   ...extra,
 });

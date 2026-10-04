@@ -2,7 +2,7 @@ import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { call, idea } from './helpers';
 
-type Claim = { idea: { slug: string; status: string; attempts: number; scores: Record<string, number> } };
+type Claim = { idea: Record<string, unknown> & { slug: string; status: string; attempts: number; scores: Record<string, number> } };
 
 const agoHours = (h: number) => new Date(Date.now() - h * 3600_000 - 60_000).toISOString();
 const status = async (slug: string) =>
@@ -45,7 +45,94 @@ describe('POST /api/agent/claim', () => {
     expect(first.slug).toBe('top-one');
     expect(first.status).toBe('building');
     expect(first.attempts).toBe(1);
-    expect(first.scores).toEqual({ need: 20, effort: 20 });
+    expect(first.scores).toEqual({ need: 30, demand: 25, fit: 25, novelty: 10, longevity: 0 });
+  });
+
+  it('does not return sources', async () => {
+    await call('POST', '/api/agent/ideas', [idea('top-one', 90)]);
+    const body = ((await (await call('POST', '/api/agent/claim')).json()) as Claim).idea;
+    expect(Object.keys(body).sort()).toEqual(
+      ['attempts', 'claimed_at', 'created_at', 'id', 'scores', 'slug', 'status', 'summary', 'title', 'total'].sort(),
+    );
+    expect(JSON.stringify(body)).not.toContain('ycombinator');
+  });
+
+  it('prefers the newer idea when totals are equal', async () => {
+    await call('POST', '/api/agent/ideas', [idea('old-one', 80), idea('mid-one', 80), idea('new-one', 80), idea('low-one', 70)]);
+    await env.DB.prepare(`UPDATE ideas SET created_at = ? WHERE slug = 'old-one'`).bind(agoHours(48)).run();
+    await env.DB.prepare(`UPDATE ideas SET created_at = ? WHERE slug = 'new-one'`).bind(agoHours(-1)).run();
+    expect(((await (await call('POST', '/api/agent/claim')).json()) as Claim).idea.slug).toBe('new-one');
+  });
+
+  it('prefers the larger id when total and created_at are equal', async () => {
+    await call('POST', '/api/agent/ideas', [idea('first-one', 80), idea('second-one', 80)]);
+    expect(((await (await call('POST', '/api/agent/claim')).json()) as Claim).idea.slug).toBe('second-one');
+  });
+
+  it('still prefers a higher total over a newer idea', async () => {
+    await call('POST', '/api/agent/ideas', [idea('top-one', 90), idea('new-one', 80)]);
+    await env.DB.prepare(`UPDATE ideas SET created_at = ? WHERE slug = 'top-one'`).bind(agoHours(48)).run();
+    expect(((await (await call('POST', '/api/agent/claim')).json()) as Claim).idea.slug).toBe('top-one');
+  });
+
+  it('skips candidates older than candidate_ttl_days before claiming', async () => {
+    await call('POST', '/api/agent/ideas', [idea('stale-one', 95), idea('edge-one', 90), idea('fresh-one', 70), idea('stale-low', 10)]);
+    await env.DB.prepare(`UPDATE ideas SET created_at = ? WHERE slug LIKE 'stale-%'`).bind(agoHours(21 * 24)).run();
+    await env.DB.prepare(`UPDATE ideas SET created_at = ? WHERE slug = 'edge-one'`).bind(agoHours(21 * 24 - 1)).run();
+    expect(((await (await call('POST', '/api/agent/claim')).json()) as Claim).idea.slug).toBe('edge-one');
+    expect((await status('stale-one'))!.status).toBe('skipped');
+    expect((await status('stale-low'))!.status).toBe('skipped');
+    expect((await status('fresh-one'))!.status).toBe('candidate');
+  });
+
+  it('expires old candidates even when the claim itself returns 204', async () => {
+    await call('POST', '/api/agent/ideas', [idea('stale-one', 95)]);
+    await env.DB.prepare(`UPDATE ideas SET created_at = ?`).bind(agoHours(22 * 24)).run();
+    expect((await call('POST', '/api/agent/claim')).status).toBe(204);
+    expect((await status('stale-one'))!.status).toBe('skipped');
+  });
+
+  it('does not expire built or building ideas', async () => {
+    await call('POST', '/api/agent/ideas', [idea('done-one', 90), idea('busy-one', 90)]);
+    await env.DB.prepare(`UPDATE ideas SET status = 'built' WHERE slug = 'done-one'`).run();
+    await env.DB.prepare(`UPDATE ideas SET status = 'building', claimed_at = ? WHERE slug = 'busy-one'`).bind(agoHours(1)).run();
+    await env.DB.prepare(`UPDATE ideas SET created_at = ?`).bind(agoHours(30 * 24)).run();
+    expect((await call('POST', '/api/agent/claim')).status).toBe(204);
+    expect((await status('done-one'))!.status).toBe('built');
+    expect((await status('busy-one'))!.status).toBe('building');
+  });
+
+  it('expires an old idea that timed out of building instead of handing it out again', async () => {
+    await call('POST', '/api/agent/ideas', [idea('stuck-one', 90)]);
+    await call('POST', '/api/agent/claim');
+    await env.DB.prepare(`UPDATE ideas SET claimed_at = ?, created_at = ?`).bind(agoHours(7), agoHours(22 * 24)).run();
+    expect((await call('POST', '/api/agent/claim')).status).toBe(204);
+    expect((await status('stuck-one'))!.status).toBe('skipped');
+  });
+
+  it('uses candidate_ttl_days from settings', async () => {
+    await env.DB.prepare(`UPDATE settings SET value = '3' WHERE key = 'candidate_ttl_days'`).run();
+    await call('POST', '/api/agent/ideas', [idea('four-days', 90), idea('two-days', 80)]);
+    await env.DB.prepare(`UPDATE ideas SET created_at = ? WHERE slug = 'four-days'`).bind(agoHours(4 * 24)).run();
+    await env.DB.prepare(`UPDATE ideas SET created_at = ? WHERE slug = 'two-days'`).bind(agoHours(2 * 24)).run();
+    expect(((await (await call('POST', '/api/agent/claim')).json()) as Claim).idea.slug).toBe('two-days');
+    expect((await status('four-days'))!.status).toBe('skipped');
+  });
+
+  it.each(['x', '', '0', '-5'])('falls back to a safe TTL when candidate_ttl_days is %j', async (value) => {
+    await env.DB.prepare(`UPDATE settings SET value = ? WHERE key = 'candidate_ttl_days'`).bind(value).run();
+    await call('POST', '/api/agent/ideas', [idea('recent-one', 90)]);
+    await env.DB.prepare(`UPDATE ideas SET created_at = ?`).bind(agoHours(12)).run();
+    expect(((await (await call('POST', '/api/agent/claim')).json()) as Claim).idea.slug).toBe('recent-one');
+  });
+
+  it('uses 21 days when candidate_ttl_days is missing', async () => {
+    await env.DB.prepare(`DELETE FROM settings WHERE key = 'candidate_ttl_days'`).run();
+    await call('POST', '/api/agent/ideas', [idea('old-one', 90), idea('ok-one', 80)]);
+    await env.DB.prepare(`UPDATE ideas SET created_at = ? WHERE slug = 'old-one'`).bind(agoHours(22 * 24)).run();
+    await env.DB.prepare(`UPDATE ideas SET created_at = ? WHERE slug = 'ok-one'`).bind(agoHours(20 * 24)).run();
+    expect(((await (await call('POST', '/api/agent/claim')).json()) as Claim).idea.slug).toBe('ok-one');
+    expect((await status('old-one'))!.status).toBe('skipped');
   });
 
   it('returns 204 while another idea is building, then hands out the next one after it is built', async () => {
