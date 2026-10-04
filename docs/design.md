@@ -71,7 +71,7 @@ trend-factory/            (GitHub 公開。routine に紐付け)
 - `trends(term, day_jst, traffic, news_json, first_seen, last_seen)`、`UNIQUE(term, day_jst)`。UPSERT で traffic は大きいほうを残す
 - `ideas(id, slug UNIQUE, title, summary, sources_json, scores_json, total, status, attempts, claimed_at, created_at)`。status は candidate / building / built / skipped(表示側で 候補 / 実装中 / 実装済み / 見送り)。slug は `^[a-z][a-z0-9-]{1,38}[a-z0-9]$`(プレビュー別名・ホスト名に使えるよう、先頭は英字、末尾はハイフン不可)。attempts は claim ごとに +1
 - `builds(slug, preview_url, pr_url UNIQUE, created_at)`
-- `runs(id, kind, started_at, finished_at, result, note)`
+- `runs(id, kind, started_at, finished_at, result, note)`。索引は `(kind, started_at)` と `(result, started_at)`。毎時 1 行増えるので、JST 0 時台の削除で `retention_days` より古い行も消す
 - `settings(key, value)`: 保存日数 400、実装する最低点
 
 ### AI 用 API(`core`、`agent.nakake.com`、`Authorization: Bearer <合言葉>`)
@@ -84,7 +84,7 @@ trend-factory/            (GitHub 公開。routine に紐付け)
 
 ### 一覧ページ(`console`)
 - 案(採点つき)、小物ごとのプレビュー / PR / 本番リンク、routine の最後の成功時刻と失敗、D1 の行数
-- 読み取り専用。外部由来の文章はすべてエスケープ、CSP は `script-src 'self'`、リンクは許可した形の URL だけ表示
+- 読み取り専用。外部由来の文章はすべてエスケープ、CSP は `default-src 'none'`(スクリプトなし。CSS だけ自分のホストから)、リンクは許可した形の URL だけ表示。外部由来のリンクにはホスト名を併記。Access の前段に加えて Worker も JWT を検証し、ACCESS_TEAM_DOMAIN / ACCESS_AUD / ALLOWED_EMAIL は公開リポジトリに置かず secret で入れる
 
 ### routine(環境 `trend-factory`、モデル sonnet)
 1. **案出し(毎日 7:00 JST)**: HN(トップ、Ask、Show)と Product Hunt フィードを取得、AI 用 API からトレンドと直近 60 日の案を取得 → `routines/ideas.md` で採点 → 新しい案だけ登録
@@ -96,7 +96,7 @@ trend-factory/            (GitHub 公開。routine に紐付け)
 
 ### 秘密情報
 - routine 環境の API credentials: `api.cloudflare.com` に工房のトークン、`agent.nakake.com` に合言葉
-- 本体: `core` の secret に合言葉。GitHub の environment `production` にデプロイ用トークン(Workers Scripts Edit + 対象ゾーンの Workers Routes / DNS)
+- 本体: `core` の secret に合言葉、`console` の secret に ACCESS_TEAM_DOMAIN / ACCESS_AUD / ALLOWED_EMAIL。GitHub の environment `production` にデプロイ用トークン(Workers Scripts Edit + 対象ゾーンの Workers Routes / DNS)
 - リポジトリには何も置かない。コミットのメールは noreply
 
 ### GitHub の設定(本人)

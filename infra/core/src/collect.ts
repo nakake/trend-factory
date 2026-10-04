@@ -54,6 +54,10 @@ export async function collect(
       const days = await getRetentionDays(env);
       const cutoff = toJstDay(new Date(now.getTime() - days * 86400_000));
       stmts.push(env.DB.prepare(`DELETE FROM trends WHERE day_jst < ?`).bind(cutoff));
+      // runs は毎時 1 行ずつ増えるので trends と同じ期限で消す
+      stmts.push(
+        env.DB.prepare(`DELETE FROM runs WHERE started_at < ?`).bind(new Date(now.getTime() - days * 86400_000).toISOString()),
+      );
     }
     stmts.push(logRun('ok', `items=${items.length}`));
     await env.DB.batch(stmts);

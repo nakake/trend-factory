@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "trend-factory-console",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "routes": [{ "pattern": "console.nakake.com", "custom_domain": true }],
+  // Access は console.nakake.com にしか掛からないので、掛からない入口は閉じておく
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "trend-factory",
+      // core/wrangler.jsonc と同じ値。`wrangler d1 create trend-factory` で出た id に置き換える
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "vars": {
+    // core と同じ値。工房アカウントの workers.dev サブドメイン(例 "xxx.workers.dev")に置き換える
+    "PREVIEW_SUFFIX": "REPLACE-ME.workers.dev"
+  }
+  // ACCESS_TEAM_DOMAIN / ACCESS_AUD / ALLOWED_EMAIL はここに書かない(公開リポジトリのため)。
+  // `wrangler secret put` で入れる(README の手順 5)。未設定のあいだは全リクエストが 503
+}

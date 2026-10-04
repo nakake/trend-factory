@@ -12,8 +12,10 @@ const LIMIT_IDEAS_PER_DAY = 40;
 const LIMIT_RUNS_PER_DAY = 60;
 const LIMIT_BUILDS_PER_DAY = 5;
 
-const CTL = /[\u0000-\u001f\u007f]/;
-const CTL_EXCEPT_NL = /[\u0000-\u0009\u000b-\u001f\u007f]/;
+// 双方向制御文字とゼロ幅文字は、一覧ページで見た目と中身を食い違わせられるので制御文字と同じ扱いで弾く
+const INVISIBLE = '\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff';
+const CTL = new RegExp(`[\\u0000-\\u001f\\u007f${INVISIBLE}]`);
+const CTL_EXCEPT_NL = new RegExp(`[\\u0000-\\u0009\\u000b-\\u001f\\u007f${INVISIBLE}]`);
 const encoder = new TextEncoder();
 const bytes = (s: string) => encoder.encode(s).length;
 
