@@ -119,7 +119,7 @@ describe('page', () => {
     const { html } = await page();
     expect(html).toContain(`href="${ok}" rel="noopener noreferrer"`);
     expect(html).toContain(`href="${pr}" rel="noopener noreferrer"`);
-    expect(html).toContain('href="https://tool-good-tool.nakake.com"');
+    expect(html).toContain('href="https://tf-good-tool.nakake.com"');
     expect(html).toContain('マージ後に有効');
     expect(html).not.toContain('href="https://evil.example');
     expect(html).not.toContain('href="https://github.com/other');

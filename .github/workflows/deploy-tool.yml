@@ -83,10 +83,10 @@ jobs:
             config="$RUNNER_TEMP/wrangler-$slug.jsonc"
             cat > "$config" <<JSON
           {
-            "name": "tool-$slug",
+            "name": "tf-$slug",
             "compatibility_date": "$COMPATIBILITY_DATE",
             "assets": { "directory": "$dir" },
-            "routes": [{ "pattern": "tool-$slug.$TOOL_DOMAIN", "custom_domain": true }]
+            "routes": [{ "pattern": "tf-$slug.$TOOL_DOMAIN", "custom_domain": true }]
           }
           JSON
             npx --yes "wrangler@$WRANGLER_VERSION" deploy --config "$config"

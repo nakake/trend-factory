@@ -44,8 +44,8 @@ trend-factory/            (GitHub 公開。routine に紐付け)
 ├── docs/                 requirements.md、design.md、operations.md(トークン更新・月次の棚卸し)
 ├── infra/
 │   ├── (D1 のスキーマは core/migrations/0001_init.sql が正本)
-│   ├── core/             agent.nakake.com。毎時 Cron で Google Trends RSS(JP)→ D1、JST 0 時台に 400 日超を削除。/api/agent/* を合言葉で提供
-│   └── console/          console.nakake.com。Access で本人のみ。読み取り専用の一覧
+│   ├── core/             trend-factory-api.nakake.com。毎時 Cron で Google Trends RSS(JP)→ D1、JST 0 時台に 400 日超を削除。/api/agent/* を合言葉で提供
+│   └── console/          trend-factory-console.nakake.com。Access で本人のみ。読み取り専用の一覧
 ├── routines/             ideas.md、build.md(routine は main のものを読む)
 ├── tools/
 │   ├── _template/        静的ファイルだけの雛形
@@ -59,9 +59,9 @@ trend-factory/            (GitHub 公開。routine に紐付け)
 
 ### 本番デプロイ(`deploy-tool.yml`)
 - main の push でだけ動く。デプロイ用トークンは environment `production` に置き、main 以外のブランチからは使えないようにする
-- wrangler の設定は小物側のファイルを使わず、Actions がその場で生成する(名前 `tool-<slug>`、assets のみ、Custom Domain `tool-<slug>.nakake.com`)。小物側の設定で他のホストを乗っ取れないようにするため
+- wrangler の設定は小物側のファイルを使わず、Actions がその場で生成する(名前 `tf-<slug>`、assets のみ、Custom Domain `tf-<slug>.nakake.com`)。小物側の設定で他のホストを乗っ取れないようにするため
 - `npm install` や小物のスクリプトは実行しない
-- 本番 URL は 1 階層の `tool-<slug>.nakake.com`。2 階層(`x.tools.nakake.com`)は無料の証明書が出ない
+- 本番 URL は 1 階層の `tf-<slug>.nakake.com`。2 階層(`x.tools.nakake.com`)は無料の証明書が出ない
 
 ### プレビュー(工房アカウント)
 - Worker は `preview` 1 個だけ。AI は `wrangler versions upload --preview-alias <slug>` で上げ、URL は `<slug>-preview.<工房sub>.workers.dev`。Worker 数の上限(100)に当たらず、後片付けも要らない
@@ -74,7 +74,7 @@ trend-factory/            (GitHub 公開。routine に紐付け)
 - `runs(id, kind, started_at, finished_at, result, note)`。索引は `(kind, started_at)` と `(result, started_at)`。毎時 1 行増えるので、JST 0 時台の削除で `retention_days` より古い行も消す
 - `settings(key, value)`: 保存日数 400、実装する最低点
 
-### AI 用 API(`core`、`agent.nakake.com`、`Authorization: Bearer <合言葉>`)
+### AI 用 API(`core`、`trend-factory-api.nakake.com`、`Authorization: Bearer <合言葉>`)
 - `GET /api/agent/trends?hours=24`、`GET /api/agent/ideas?days=60`(重複を避ける材料)
 - `POST /api/agent/ideas`: 追加のみ。1 回 20 件まで、直近 24 時間で 40 件を超えたら 429。一部の slug が重複したら 201 で、重複分を `skipped` に返し他は入れる。全件が重複なら 409。同一リクエスト内で slug が重なったときは最初のものを入れ、後のものを `skipped` にする(`inserted` と両方には出ない)。scores はキー `^[a-z_]{1,30}$` で最大 10 個、sources は https の URL(空白・制御文字なし)。文字列は制御文字を弾く(summary と note は改行だけ可)
 - `POST /api/agent/claim`: 最低点以上で最高点の 候補 を 1 件、`UPDATE ... RETURNING` で 実装中 にして返す。6 時間たっても 実装中 のものは 候補 に戻す。building が 1 件でもあれば(6 時間経過分を戻した後で判定)取らずに 204。戻すとき attempts が 3 以上なら skipped にして居座りを防ぐ。該当なしでも 204 で、routine は何もせず終わる
@@ -95,7 +95,7 @@ trend-factory/            (GitHub 公開。routine に紐付け)
 `build.md` の確認: HTML の構文チェック、ヘッドレスブラウザ(入らなければ happy-dom)でページを開いて JS の実行時エラーが無いこと、プレビュー URL で 200 と主要な文字列。禁止: 外部への通信、解析タグ、秘密情報、`tools/<slug>/` の外の変更。
 
 ### 秘密情報
-- routine 環境の API credentials: `api.cloudflare.com` に工房のトークン、`agent.nakake.com` に合言葉
+- routine 環境の API credentials: `api.cloudflare.com` に工房のトークン、`trend-factory-api.nakake.com` に合言葉
 - 本体: `core` の secret に合言葉、`console` の secret に ACCESS_TEAM_DOMAIN / ACCESS_AUD / ALLOWED_EMAIL。GitHub の environment `production` にデプロイ用トークン(Workers Scripts Edit + 対象ゾーンの Workers Routes / DNS)
 - リポジトリには何も置かない。コミットのメールは noreply
 
@@ -110,15 +110,15 @@ trend-factory/            (GitHub 公開。routine に紐付け)
 1. **骨組み**: 上の構成、`docs/design.md`、`docs/operations.md`、`.github/` 一式、`tools/_template`。本人が GitHub に公開リポジトリを作って push、main 保護と Actions 権限を設定
 2. **D1 と core**: スキーマ、収集 Cron、AI 用 API。本人が D1 作成・deploy・合言葉登録 → 1〜2 時間後に trends が増える、合言葉なしは 401、claim の二重取りが起きないことを curl で確認
 3. **console**: 一覧ページ、Access 設定 → ログインなしで開くとログイン画面、ログイン後に表示
-4. **本番デプロイ**: `pr-check.yml`、`deploy-tool.yml`、production 環境のトークン。`tools/_template` を本人の PR で `tool-hello` として出し、`tool-hello.nakake.com` が開けることを確認。範囲外を触る PR が落ちることも確認
-5. **工房アカウントと routine 環境**: 本人がアカウント作成・workers.dev 設定・トークン発行・credentials 登録、環境の許可リストに `agent.nakake.com` を追加。テスト用の routine で次を確認:
+4. **本番デプロイ**: `pr-check.yml`、`deploy-tool.yml`、production 環境のトークン。`tools/_template` を本人の PR で `tf-hello-tool` として出し、`tf-hello-tool.nakake.com` が開けることを確認。範囲外を触る PR が落ちることも確認
+5. **工房アカウントと routine 環境**: 本人がアカウント作成・workers.dev 設定・トークン発行・credentials 登録、環境の許可リストに `trend-factory-api.nakake.com` を追加。テスト用の routine で次を確認:
    - セッション内の env・`~/.wrangler`・設定ファイルにトークンの値が出ない
    - wrangler と cf のそれぞれが credentials の注入で動く(どちらもダメなら環境変数で渡す。プレビュー専用のアカウントなので影響は限られる)
    - wrangler の `--preview-alias`、cf の `cf workers versions create` + プレビュー別名で、プレビュー URL が開ける。結果で AI 側の CLI を決める
    - ヘッドレスブラウザが入るか
    - routine から PR を作れて、マージや main への書き込みはできない
 6. **案出し routine**: `ideas.md`、手動で 1 回実行 → 一覧ページに案が並ぶ
-7. **実装 routine**: `build.md`、手動で 1 回実行 → プレビュー、PR、一覧の表示 → 本人がマージ → `tool-<slug>.nakake.com` で開ける
+7. **実装 routine**: `build.md`、手動で 1 回実行 → プレビュー、PR、一覧の表示 → 本人がマージ → `tf-<slug>.nakake.com` で開ける
 8. **定期実行を有効化**。1 週間運用して採点基準と頻度を見直す
 
 ## 確認できていないこと(上の段取りで確かめる)
