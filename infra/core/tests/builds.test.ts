@@ -2,7 +2,7 @@ import { env } from 'cloudflare:workers';
 import { describe, expect, it, vi } from 'vitest';
 import { call, callWith, envWith, idea } from './helpers';
 
-const PR = 'https://github.com/nakake/trend-factory/pull/12';
+const PR = 'https://github.com/nakake/trend-factory-tools/pull/12';
 const preview = (slug: string) => `https://${slug}-preview.${env.PREVIEW_SUFFIX}`;
 
 async function building(slug: string) {
@@ -40,9 +40,14 @@ describe('POST /api/agent/builds', () => {
 
   it.each([
     'https://github.com/other/repo/pull/1',
-    'https://github.com/nakake/trend-factory/pull/x',
-    'https://github.com/nakake/trend-factory/pull/1/files',
-    'http://github.com/nakake/trend-factory/pull/1',
+    'https://github.com/nakake/trend-factory/pull/1',
+    'https://github.com/nakake/trend-factory-tools/pull/x',
+    'https://github.com/nakake/trend-factory-tools/pull/1/files',
+    'https://github.com/nakake/trend-factory-tools/pull/12345678',
+    'https://github.com/nakake/trend-factory-tools/pull/',
+    'https://github.com/nakake/trend-factory-tools/pull/0',
+    'https://github.com/nakake/trend-factory-tools/pull/012',
+    'http://github.com/nakake/trend-factory-tools/pull/1',
   ])('rejects pr_url %s', async (pr) => {
     await building('tool-one');
     expect((await post('tool-one', pr)).status).toBe(400);
@@ -76,7 +81,7 @@ describe('POST /api/agent/builds', () => {
   it('returns 429 after 5 builds in 24 hours', async () => {
     const now = new Date().toISOString();
     for (let i = 1; i <= 5; i++)
-      await env.DB.prepare(`INSERT INTO builds VALUES (?, 'p', ?, ?)`).bind(`old-${i}`, `https://github.com/nakake/trend-factory/pull/${100 + i}`, now).run();
+      await env.DB.prepare(`INSERT INTO builds VALUES (?, 'p', ?, ?)`).bind(`old-${i}`, `https://github.com/nakake/trend-factory-tools/pull/${100 + i}`, now).run();
     await building('tool-one');
     expect((await post('tool-one')).status).toBe(429);
     await env.DB.prepare(`UPDATE builds SET created_at = '2000-01-01T00:00:00.000Z' WHERE slug = 'old-1'`).run();
