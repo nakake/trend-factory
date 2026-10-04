@@ -67,7 +67,7 @@ function builds(rows: BuildRow[], suffix: string): string {
   if (!rows.length) return '<h2>小物</h2><p class="muted">まだありません。</p>';
   const body = safeRows(rows, 5, (b) => {
       const pv = stripSlash(b.preview_url);
-      const prod = `https://tool-${b.slug}.nakake.com`;
+      const prod = `https://tf-${b.slug}.nakake.com`;
       const prodOk = /^[a-z][a-z0-9-]{1,38}[a-z0-9]$/.test(b.slug);
       return `<tr><td>${esc(b.slug)}</td><td class="nowrap">${esc(jst(b.created_at))}</td>
 <td>${link(pv, isPreviewUrl(pv, b.slug, suffix))}</td>

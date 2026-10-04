@@ -3,8 +3,8 @@
   "name": "trend-factory-console",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
-  "routes": [{ "pattern": "console.nakake.com", "custom_domain": true }],
-  // Access は console.nakake.com にしか掛からないので、掛からない入口は閉じておく
+  "routes": [{ "pattern": "trend-factory-console.nakake.com", "custom_domain": true }],
+  // Access は trend-factory-console.nakake.com にしか掛からないので、掛からない入口は閉じておく
   "workers_dev": false,
   "preview_urls": false,
   "observability": { "enabled": true },
