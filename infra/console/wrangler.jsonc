@@ -12,8 +12,8 @@
     {
       "binding": "DB",
       "database_name": "trend-factory",
-      // core/wrangler.jsonc と同じ値。`wrangler d1 create trend-factory` で出た id に置き換える
-      "database_id": "00000000-0000-0000-0000-000000000000"
+      // core/wrangler.jsonc と同じ値にする
+      "database_id": "57c530ff-3b1f-4551-aa49-6c1d7f5a5727"
     }
   ],
   "vars": {
