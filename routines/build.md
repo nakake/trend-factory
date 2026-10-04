@@ -241,7 +241,7 @@ cd /tmp/tf-preview && npx --yes wrangler@4.147.0 versions upload --preview-alias
 ```
 
 - `wrangler deploy` や `versions deploy` は実行しません(上げるだけ)
-- wrangler の出力の `Version Preview Alias URL` が `https://<slug>-preview.trend-factory-preview.workers.dev` と一致することを確かめる。一致しなければ B へ
+- wrangler の出力に `https://<slug>-preview.trend-factory-preview.workers.dev` が含まれることを確かめる(別名付きの URL として表示される)。含まれなければ B へ
 - その URL を curl で開き、200 と `<title>` を確かめる(反映待ちは 10 秒おきに最大 6 回)。だめなら B へ
 
 ### 8. プルリクエストを出して登録する
