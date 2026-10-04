@@ -3,11 +3,15 @@ export const esc = (v: unknown): string =>
 
 // 空白・制御文字・引用符・山括弧・双方向制御文字・ゼロ幅文字を含む URL はリンクにしない(エスケープに加えた二重の防御)
 const SAFE_URL = /^https:\/\/[^\s\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff"'<>`\\]+$/;
-const PR_URL = /^https:\/\/github\.com\/nakake\/trend-factory\/pull\/\d+$/;
+const PR_URL = /^https:\/\/github\.com\/nakake\/trend-factory-tools\/pull\/(\d{1,7})$/;
 const SLUG = /^[a-z][a-z0-9-]{1,38}[a-z0-9]$/;
 
 export const isSafeUrl = (u: string) => SAFE_URL.test(u) && u.length <= 1000;
 export const isPrUrl = (u: string) => PR_URL.test(u);
+export const isSlug = (s: string) => SLUG.test(s);
+
+// 検証を通った pr_url からだけ番号を取る。通らない値から作ったコマンドを本人に打たせないため
+export const prNumber = (u: string): string | null => PR_URL.exec(u)?.[1] ?? null;
 
 // core は末尾の `/` 1 個を許して保存するので、比較前に落とす
 export const stripSlash = (u: string) => u.replace(/\/$/, '');

@@ -1,5 +1,5 @@
 import type { BuildRow, IdeaRow, PageData, RunRow, TrendRow } from './data';
-import { esc, externalLink, isPrUrl, isPreviewUrl, jst, link, stripSlash } from './html';
+import { esc, externalLink, isPrUrl, isPreviewUrl, isSlug, jst, link, prNumber, stripSlash } from './html';
 
 export const COLLECT_STALE_MS = 2 * 3600_000;
 
@@ -65,16 +65,19 @@ function summary(d: PageData): string {
 
 function builds(rows: BuildRow[], suffix: string): string {
   if (!rows.length) return '<h2>小物</h2><p class="muted">まだありません。</p>';
-  const body = safeRows(rows, 5, (b) => {
+  const body = safeRows(rows, 6, (b) => {
       const pv = stripSlash(b.preview_url);
       const prod = `https://tf-${b.slug}.nakake.com`;
-      const prodOk = /^[a-z][a-z0-9-]{1,38}[a-z0-9]$/.test(b.slug);
+      const prodOk = isSlug(b.slug);
+      const n = prNumber(b.pr_url);
+      const cmd = prodOk && n ? `<code>pnpm -C infra publish-tool ${esc(b.slug)} ${esc(n)}</code>` : '-';
       return `<tr><td>${esc(b.slug)}</td><td class="nowrap">${esc(jst(b.created_at))}</td>
 <td>${link(pv, isPreviewUrl(pv, b.slug, suffix))}</td>
 <td>${link(b.pr_url, isPrUrl(b.pr_url))}</td>
-<td>${prodOk ? link(prod, true) : '-'} <span class="muted">(マージ後に有効)</span></td></tr>`;
+<td>${prodOk ? link(prod, true) : '-'} <span class="muted">(公開の操作後に有効)</span></td>
+<td>${cmd}</td></tr>`;
   });
-  return `<h2>小物</h2><div class="table-wrap"><table><thead><tr><th>slug</th><th>作成(JST)</th><th>プレビュー</th><th>PR</th><th>本番 URL(マージ後に有効)</th></tr></thead><tbody>${body}</tbody></table></div>`;
+  return `<h2>小物</h2><div class="table-wrap"><table><thead><tr><th>slug</th><th>作成(JST)</th><th>プレビュー</th><th>PR</th><th>本番 URL(公開の操作後に有効)</th><th>公開コマンド</th></tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
 function ideaRow(i: IdeaRow): string {
