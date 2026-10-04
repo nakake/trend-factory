@@ -45,6 +45,8 @@ describe('POST /api/agent/builds', () => {
     'https://github.com/nakake/trend-factory-tools/pull/1/files',
     'https://github.com/nakake/trend-factory-tools/pull/12345678',
     'https://github.com/nakake/trend-factory-tools/pull/',
+    'https://github.com/nakake/trend-factory-tools/pull/0',
+    'https://github.com/nakake/trend-factory-tools/pull/012',
     'http://github.com/nakake/trend-factory-tools/pull/1',
   ])('rejects pr_url %s', async (pr) => {
     await building('tool-one');

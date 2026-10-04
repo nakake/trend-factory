@@ -27,7 +27,9 @@
 - API credentials のヘッダー注入は wrangler / cf のアセットアップロードと両立しない。アップロードは別の JWT を Authorization に使うため、注入で上書きされて 401 / 9106 になる。合言葉(`trend-factory-api.nakake.com`)の注入は動く
 - 同梱ブラウザは `/opt/pw-browsers/chromium-1194/chrome-linux/chrome` を playwright-core の `executablePath` に指定すると動く。`cdn.playwright.dev` は許可リスト外なので、ブラウザを新しく落とすことはできない
 - クラウドから届く情報源: Google Trends RSS、HN の Firebase API と Algolia、Product Hunt のフィード
-- `wrangler deploy --message` の文字列はバージョン側に付く。`wrangler deployments list --json` のデプロイ側の `workers/message` は、メッセージ無しで公開した `tf-hello-tool` では `Automatic deployment on upload.` だった(wrangler 4.147.0)
+- `wrangler deployments list --json` のデプロイ側の `workers/message` は、メッセージ無しで公開した `tf-hello-tool` では `Automatic deployment on upload.` だった(wrangler 4.147.0)。`wrangler deploy --message` は help に「バージョンの説明」とある。どちらに付くかは、`--message` を付けた最初の公開のあとで確かめる
+- git 2.43 は `git --attr-source=<空ツリー> diff` を受け付ける
+- 未確認: wrangler 4.147.0 の静的アセットで `_headers` が効くか(`--dry-run` では読み込みまでしか分からない)。公開スクリプトが公開後に応答ヘッダーで確かめる
 
 ### 誤りだった前提(v2 まで)
 
@@ -61,7 +63,7 @@ trend-factory/
 ├── infra/
 │   ├── core/             trend-factory-api.nakake.com。毎時 Cron で Google Trends RSS(JP)→ D1。/api/agent/* を合言葉で提供
 │   ├── console/          trend-factory-console.nakake.com。Access で本人のみ。読み取り専用の一覧
-│   └── scripts/          publish-tool.sh、unpublish-tool.sh、lib/、test/
+│   └── scripts/          publish-tool.sh、unpublish-tool.sh、lib/(検査、検出、表示、配信)、test/
 ├── routines/             ideas.md、build.md の正本(routine からは読めない)
 └── .github/CODEOWNERS
 
@@ -99,19 +101,39 @@ AI が書いたものを本人の端末と本人の権限で扱うので、各�
 
 | 段 | やること | 理由 |
 |---|---|---|
-| 入力 | 標準入力が端末でなければ終了。slug と PR 番号の形を検査 | 他のプログラムや AI のセッションから `yes \|` で確認を流し込めないようにする |
+| 入力 | 標準入力が端末でなければ終了。slug と PR 番号(`[1-9]` で始まる 7 桁まで)の形を検査 | 他のプログラムや AI のセッションから `yes \|` で確認を流し込めないようにする |
 | PR | `gh pr view` で SHA、ブランチ名、base、フォークかどうかだけを取る。base が main、フォークでない、ブランチが `claude/tool-<slug>` であること | タイトルと本文は AI が書く文字列で、端末に出すと表示を偽装されうるので取得しない |
-| 取得 | キャッシュ(`~/.cache/trend-factory/tools.git`)にその SHA を fetch。以後は SHA だけを使う | ブランチ名を引き直すと、確認中に push された別のコミットを公開しうる |
-| 検査 | `lib/check-tool-tree.sh`。モードは 100644 だけ、各パス要素は `^[a-z0-9][a-z0-9._-]*$`、拡張子は `.html .css .js .svg .png .jpg .webp .ico .json .txt`、`index.html` があること、50 ファイル以下、合計 5MB 以下 | シンボリックリンクは手元のファイルを公開しうる。`_headers` `_redirects` `.assetsignore` `.well-known` などは Cloudflare 側で特別な意味を持つので、先頭が `.` と `_` の名前を一律に落とす |
-| 検知 | コミットのルートと tools の main のルートに `CLAUDE.md` `CLAUDE.local.md` `AGENTS.md` `.claude` `.mcp.json` `.github` があれば警告し、続けるか聞く | routine への指示が仕込まれた可能性がある |
-| 前回 | `wrangler deployments list --name tf-<slug> --json` の最新デプロイから `sha=<sha>` を探す。デプロイ側に無ければ、そのバージョンを `wrangler versions view` で見る。どちらにも無ければ初回と同じ扱い(全文表示) | 差分で見せるため |
-| 表示 | ファイル一覧と、前回からの差分(無ければテキスト全文)をページャで。制御文字は可視の文字に置き換える | ESC、CR、双方向制御文字で、読んでいる中身を偽装されないようにする |
-| 試す | その SHA の `tools/<slug>/` を一時ディレクトリに展開し、127.0.0.1 の空きポートで配信して Enter を待つ。展開したファイルは blob のハッシュと突き合わせる | `git archive` はツリー内の `.gitattributes` に従うので、見せた中身と違うものが出ないようにする |
+| 取得 | キャッシュ(`~/.cache/trend-factory/tools.git`)に、その SHA と default branch を `--depth=1`、`transfer.fsckObjects=true` で fetch。以後は SHA だけを使う | ブランチ名を引き直すと、確認中に push された別のコミットを公開しうる。履歴は要らない。細工されたオブジェクトは受け取る時点で落とす |
+| 検査 | `lib/check-tool-tree.sh`。モードは 100644 だけ、各パス要素は `^[a-z0-9][a-z0-9._-]*$`、拡張子は `.html .css .js .svg .png .jpg .webp .ico .json .txt`、`index.html` があること、50 ファイル以下、合計 5MB 以下。テキスト(`.html .css .js .svg .json .txt`)に NUL が無いこと、画像(`.png .jpg .webp .ico`)の先頭バイトが拡張子と合うこと。違反が 20 件で打ち切る | シンボリックリンクは手元のファイルを公開しうる。先頭が `.` と `_` の名前は Cloudflare 側で特別な意味を持つ(`_headers` `_redirects` `.assetsignore` `.well-known`)。NUL があると差分が「Binary files differ」になって中身が隠れる。中身が HTML や JS の「偽の画像」は、読まずに通してしまう |
+| 検知 | `lib/find-agent-files.sh`。PR のコミットと default branch のツリー全体から、basename が `CLAUDE.md` `CLAUDE.local.md` `AGENTS.md` `.mcp.json` のもの、パスに `.claude/` `.github/` を含むもの、ルートの `.gitattributes` `.gitmodules` `.lfsconfig` を探し、あれば警告して続けるか聞く。default branch が main でないこと自体も警告する | routine への指示が仕込まれた可能性がある。サブディレクトリの CLAUDE.md も、そこで作業すれば読まれる |
+| 展開 | 検査済みの (パス, blob) の一覧から `git cat-file blob` で 1 つずつ書き、`git hash-object` で突き合わせる | `git archive` や checkout はツリー内の `.gitattributes`(export-subst、改行変換)に従うので、検査した中身と違うものが出うる |
+| 機械検出 | `lib/scan-tool.py`。外部 URL、通信(`fetch(` など)、文字列の実行(`eval(` など)、難読化(`atob`、長い base64 風の連続)、`<iframe` `<form` `data:` `on...=` などの書き方、500 文字を超える行、非 ASCII を含む .js / .css を、規則ごとにファイル名・件数・最初の行番号で要約する。ページャの前と、slug の入力の前に出す | 読む場所を示す。誤検出は多く、これで止めはしない。要約には中身を出さない |
+| ヘッダー | 展開先のルートに `_headers` を生成する(下の「公開物の制約」) | 読み落としがあっても、外部への通信とインラインのスクリプトをブラウザ側で止める |
+| 前回 | `wrangler deployments list --json` の最新デプロイから `sha=<sha>` を探す。デプロイ側に無ければ、そのバージョンを `wrangler versions view` で見る。どちらにも無ければ初回と同じ扱い(全文表示)。Worker が無い(10007)なら未公開、それ以外の失敗は中止 | 差分で見せるため。「調べられなかった」を未公開と取り違えると、上書きの警告が抜ける |
+| 表示 | ファイル一覧と、前回からの差分(無ければテキスト全文)をページャで。差分は `--text`、属性の読み取り元は空ツリー。全文は各行に `\| ` を前置。通す文字を決め(ASCII、ひらがな、カタカナ、漢字、全角の記号と英数)、それ以外は `<U+XXXX>` に置き換える。ページャは `LESS= LESSSECURE=1 less -FX` | ESC、CR、双方向制御文字、見えない文字で、読んでいる中身を偽装されないようにする。区切り行を中身で偽造できないようにする |
+| 試す | `lib/preview-server.py` で 127.0.0.1 の空きポートから配信し、Enter を待つ。本番と同じ CSP を付け、ディレクトリ一覧は出さず、アクセスログを端末に出す。起動に失敗したら中止 | 見たものと本番で挙動が同じになるようにする |
 | 確認 | slug を入力させ、一致したときだけ進む。公開済みなら上書きと明示 | y の連打で通らないようにする |
-| 公開 | wrangler の設定を一時ディレクトリに生成(名前 `tf-<slug>`、assets のみ、Custom Domain `tf-<slug>.nakake.com`、`workers_dev` と `preview_urls` は false)し、ロックファイルで固定した wrangler で deploy。`--message "sha=<sha> pr=<PR>"` を付ける | 小物側の設定で他のホストを乗っ取れないようにする。npx でその時点の最新版を取ってこない |
-| 確かめる | `https://tf-<slug>.nakake.com/` が 200 を返すこと | |
+| 公開 | wrangler の設定を一時ディレクトリに生成(`account_id`、名前 `tf-<slug>`、assets のみ、Custom Domain `tf-<slug>.nakake.com`、`workers_dev` と `preview_urls` は false)し、ロックファイルで固定した wrangler で deploy。`--message "sha=<sha> pr=<PR>"` を付ける。wrangler の全コマンドにこの設定を `--config` で渡す | wrangler は cwd から親へ設定を探し、設定の `account_id` は環境変数より強い。上位に置かれた設定で別のアカウントに向かないようにする。npx でその時点の最新版を取ってこない |
+| 確かめる | `https://tf-<slug>.nakake.com/` が 200 で、応答に Content-Security-Policy があること。無ければ目立つ警告を出して異常終了 | `_headers` が効いていない公開に気づけるようにする |
 
-小物側の `npm install` やスクリプトは実行しない。取り下げは `pnpm -C infra unpublish-tool <slug>`(端末必須、slug を再入力)。
+小物側の `npm install` やスクリプトは実行しない。取り下げは `pnpm -C infra unpublish-tool <slug>`(端末必須、slug を再入力。wrangler 自身の確認は飛ばさない)。
+
+### 公開物の制約(CSP)
+
+公開スクリプトは、すべての小物に次のヘッダーを付ける。小物の側は `_` で始まるファイルを置けないので、上書きできない。
+
+```
+Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'
+X-Content-Type-Options: nosniff
+Referrer-Policy: no-referrer
+```
+
+小物は次の前提で作る。手順書(`routines/build.md`)にも書く。
+
+- スクリプトは同じ場所の `.js` ファイルから読む。インラインの `<script>`、`onclick=` などのイベント属性、`eval` は動かない
+- スタイルは同じ場所の `.css` ファイルから読む。インラインの `<style>` と `style=` 属性は動かない
+- 外部への通信(`fetch`、画像、フォント、CDN のライブラリ)は動かない。画像は同じ場所のファイルか `data:` だけ
+- 他のサイトに埋め込めない(`frame-ancestors 'none'`)
 
 ### プレビュー(工房アカウント)
 
@@ -142,7 +164,7 @@ AI が書いたものを本人の端末と本人の権限で扱うので、各�
 - `GET /api/agent/trends?hours=24`、`GET /api/agent/ideas?days=60`(重複を避ける材料)
 - `POST /api/agent/ideas`: 追加のみ。1 回 20 件まで、直近 24 時間で 40 件を超えたら 429。一部の slug が重複したら 201 で、重複分を `skipped` に返す。全件が重複なら 409。scores はキー `^[a-z_]{1,30}$` で最大 10 個、sources は https の URL。文字列は制御文字を弾く(summary と note は改行だけ可)
 - `POST /api/agent/claim`: 最低点以上で最高点の 候補 を 1 件、実装中 にして返す。6 時間たっても 実装中 のものは 候補 に戻す(attempts が 3 以上なら 見送り)。building が 1 件でもあれば取らずに 204
-- `POST /api/agent/builds`: preview_url は `https://<slug>-preview.<PREVIEW_SUFFIX>`、pr_url は `^https://github\.com/nakake/trend-factory-tools/pull/\d{1,7}$` だけ受け付ける。直近 24 時間で 5 件を超えたら 429、pr_url が重複したら 409
+- `POST /api/agent/builds`: preview_url は `https://<slug>-preview.<PREVIEW_SUFFIX>`、pr_url は `^https://github\.com/nakake/trend-factory-tools/pull/[1-9]\d{0,6}$` だけ受け付ける。直近 24 時間で 5 件を超えたら 429、pr_url が重複したら 409
 - `POST /api/agent/runs`: 開始・終了・失敗の記録。note は自由文(routine が手順書の版を書いてよい)。直近 24 時間で 60 件を超えたら 429
 - 本番・承認に関わる操作は持たない
 
@@ -170,10 +192,11 @@ Cloudflare は 2026-09-28 に後継の CLI `cf` をオープンベータで出�
 ## 残るリスク
 
 - **AI が tools リポジトリを壊す・荒らす**: 本番には出ない。履歴から戻せる
-- **tools リポジトリに routine への指示が仕込まれる**(`CLAUDE.md`、`.claude/`、`.mcp.json`): 以後の実行に効き続ける。公開スクリプトと月次の棚卸しで検知する。検知するのはルートだけで、`tools/` 以下に置かれたものは見ていない
+- **tools リポジトリに routine への指示が仕込まれる**(`CLAUDE.md`、`.claude/`、`.mcp.json`): 以後の実行に効き続ける。公開スクリプトと月次の棚卸しで検知する。検知は公開のときと棚卸しのときだけで、仕込まれてから見つけるまでの実行には効いてしまう。見るのは PR のコミットと default branch で、他のブランチは見ていない
 - **工房トークンの漏えい**: プレビュー専用アカウントで第三者がページを公開できる。本番・D1・一覧ページには届かない。ローテーションで対処(`docs/operations.md`)
 - **本人が中身を読まずに公開する**: 仕組みでは防げない。スクリプトは差分か全文を必ず見せ、手元で動かす段を挟む
-- **公開する小物そのものの悪意**(外部への通信、解析タグなど): 許可拡張子の中で書ける。差分を読むことと手元で動かすことに頼っている
+- **公開する小物そのものの悪意**: 外部への通信とインラインのスクリプトは CSP で止める(`_headers` が効いている前提。公開後に確かめる)。同じ場所の中で完結する悪意(紛らわしい表示、入力を誘う文面、`location` の書き換えによる遷移など)は CSP では止まらず、差分を読むことと手元で動かすことに頼っている。機械検出は読む場所を示すだけで、難読化すれば抜けられる
+- **通す文字を絞った表示の読みにくさ**: 絵文字やアクセント付きの文字は `<U+XXXX>` になる。ASCII と日本語の範囲の中で似た字を使う偽装(全角と半角など)は残る
 - **本人の端末で動く AI セッション**: 疑似端末を用意すれば公開スクリプトを対話なしで動かせる。端末の検査は `yes |` のような流し込みを止めるだけで、本人の権限で動くプログラムからは守れない
 - **Claude の GitHub App の対象が広がる**: `trend-factory` が対象に入ると v2 と同じ状態に戻る。月次で確かめる
 - **一覧ページに AI が登録した文字列が出る**: エスケープと URL 検証で対処済み。公開コマンドの文字は検証済みの値からしか作らない
@@ -183,5 +206,10 @@ Cloudflare は 2026-09-28 に後継の CLI `cf` をオープンベータで出�
 
 - 通し: 案出し → claim → 実装 → プレビュー → PR → `publish-tool` → 本番 URL
 - 権限: 工房トークンで本体アカウントの Worker や D1 が見えない(403)、合言葉なしの AI 用 API は 401、ログインなしの一覧ページはログイン画面、routine から `trend-factory` へ push できない
-- 公開スクリプト: 端末なし・不正な slug・検査に落ちるツリーで、何も公開せずに終わる(`pnpm -C infra test` が検査とフィルタを確かめる)
+- 公開スクリプト(`pnpm -C infra test` が `infra/scripts/test/` を走らせる)
+  - `test-check-tool-tree.sh`: ツリー検査の各違反(モード、名前、拡張子、NUL、偽の画像、件数、サイズ、打ち切り)を理由の文言まで照合。指示ファイルの検知
+  - `test-sanitize.sh`: 通す文字と置き換える文字(制御文字、双方向制御、各種空白、見えないハングル、タグ文字、異体字セレクタ、私用領域など)。前回 SHA の取り出し
+  - `test-scan-tool.sh`: 機械検出の各規則。手元の配信のヘッダー、一覧なし、`_headers` やシンボリックリンクを配信しないこと、アクセスログ
+  - `test-publish-e2e.sh`: `gh`、`curl`、`less`、wrangler を偽物に替え、疑似端末と手元の一時リポジトリで本体を通す。slug の不一致で公開しない、一致で deploy が期待の引数と設定で 1 回だけ呼ばれる、検査に落ちるツリーと端末なしで wrangler を呼ばない、NUL 入りの差分が表示に出る、指示ファイルと default branch の警告、生成した `_headers`、10007 を未公開と判定、公開後に CSP が無いと異常終了
+  - テストしていないもの: 本物の `gh`・wrangler・Cloudflare との結合(実際の公開と取り下げ、`_headers` の効き、`--message` の読み戻し)。最初の公開で本人が確かめる
 - 失敗系: 候補が 0 件や最低点未満のときに実装 routine が何もせず終わる、実装中のまま 6 時間たった案が候補に戻る、一覧ページに失敗が出る

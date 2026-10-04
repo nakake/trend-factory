@@ -3,7 +3,7 @@ export const esc = (v: unknown): string =>
 
 // 空白・制御文字・引用符・山括弧・双方向制御文字・ゼロ幅文字を含む URL はリンクにしない(エスケープに加えた二重の防御)
 const SAFE_URL = /^https:\/\/[^\s\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff"'<>`\\]+$/;
-const PR_URL = /^https:\/\/github\.com\/nakake\/trend-factory-tools\/pull\/(\d{1,7})$/;
+const PR_URL = /^https:\/\/github\.com\/nakake\/trend-factory-tools\/pull\/([1-9]\d{0,6})$/;
 const SLUG = /^[a-z][a-z0-9-]{1,38}[a-z0-9]$/;
 
 export const isSafeUrl = (u: string) => SAFE_URL.test(u) && u.length <= 1000;

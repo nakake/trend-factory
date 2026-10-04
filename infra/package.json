@@ -5,7 +5,7 @@
   "packageManager": "pnpm@11.22.0",
   "scripts": {
     "test": "pnpm -C core test && pnpm -C console test && pnpm run test:scripts",
-    "test:scripts": "bash scripts/test/test-check-tool-tree.sh && bash scripts/test/test-sanitize.sh",
+    "test:scripts": "bash scripts/test/test-check-tool-tree.sh && bash scripts/test/test-sanitize.sh && bash scripts/test/test-scan-tool.sh && bash scripts/test/test-publish-e2e.sh",
     "typecheck": "pnpm -C core typecheck && pnpm -C console typecheck",
     "publish-tool": "bash scripts/publish-tool.sh",
     "unpublish-tool": "bash scripts/unpublish-tool.sh"

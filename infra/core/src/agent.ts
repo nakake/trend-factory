@@ -4,7 +4,7 @@ const SLUG_RE = /^[a-z][a-z0-9-]{1,38}[a-z0-9]$/;
 const SCORE_KEY_RE = /^[a-z_]{1,30}$/;
 const SOURCE_RE = /^https:\/\/\S+$/;
 // 小物は別リポジトリ(routine に紐付ける唯一のリポジトリ)にある。このリポジトリの PR は AI が作れないので受け付けない
-const PR_URL_RE = /^https:\/\/github\.com\/nakake\/trend-factory-tools\/pull\/\d{1,7}$/;
+const PR_URL_RE = /^https:\/\/github\.com\/nakake\/trend-factory-tools\/pull\/[1-9]\d{0,6}$/;
 const MAX_BODY_BYTES = 256 * 1024;
 const BUILDING_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;

