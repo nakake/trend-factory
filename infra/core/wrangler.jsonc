@@ -15,7 +15,7 @@
     }
   ],
   "vars": {
-    // 工房アカウントの workers.dev サブドメイン(例 "xxx.workers.dev")に置き換える
-    "PREVIEW_SUFFIX": "REPLACE-ME.workers.dev"
+    // 工房アカウント(プレビュー専用)の workers.dev サブドメイン
+    "PREVIEW_SUFFIX": "trend-factory-preview.workers.dev"
   }
 }
