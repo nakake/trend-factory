@@ -2,8 +2,8 @@
 
 routine の手順書の正本を置く場所。
 
-- `ideas.md`: 案出し routine の手順書(未作成)
-- `build.md`: 実装 routine の手順書(未作成)
+- `ideas.md`: 案出し routine の手順書
+- `build.md`: 実装 routine の手順書
 
 ## 置き場と反映のしかた
 
